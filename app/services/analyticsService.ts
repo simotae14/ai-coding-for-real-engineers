@@ -1,129 +1,109 @@
-import { eq, and, inArray, gte, sql } from "drizzle-orm";
+import { sql, eq } from "drizzle-orm";
 import { db } from "~/db";
-import { courses, purchases, enrollments, courseRatings } from "~/db/schema";
+import { purchases, enrollments, courseRatings, courses } from "~/db/schema";
 
 // ─── Analytics Service ───
-// Computes revenue-focused analytics for an instructor's courses over a time period.
-// Uses positional parameters (project convention).
+// Encapsulates all database query logic for the instructor analytics dashboard.
+// Takes an instructor ID and time period, returns summary data.
 
-export type AnalyticsPeriod = "7d" | "30d" | "12m" | "all";
+export type TimePeriod = "7d" | "30d" | "12m" | "all";
 
 export interface AnalyticsSummary {
-  totalRevenueCents: number;
+  totalRevenue: number;
   totalEnrollments: number;
   averageRating: number | null;
   ratingCount: number;
 }
 
-export interface InstructorAnalytics {
-  summary: AnalyticsSummary;
-}
+function getStartDate(period: TimePeriod): string | null {
+  if (period === "all") return null;
 
-/**
- * Returns the ISO timestamp marking the start of the given period, or null for "all"
- * (no lower bound — the earliest data point is whatever the instructor's first purchase is).
- */
-function getPeriodStartDate(period: AnalyticsPeriod): string | null {
   const now = new Date();
-
   switch (period) {
     case "7d":
       now.setDate(now.getDate() - 7);
-      return now.toISOString();
+      break;
     case "30d":
       now.setDate(now.getDate() - 30);
-      return now.toISOString();
+      break;
     case "12m":
       now.setMonth(now.getMonth() - 12);
-      return now.toISOString();
-    case "all":
-      return null;
+      break;
   }
+  return now.toISOString();
 }
 
-function getCourseIdsForInstructor(instructorId: number): number[] {
-  const rows = db
+export function getAnalyticsSummary(opts: {
+  instructorId: number;
+  period: TimePeriod;
+}): AnalyticsSummary {
+  const { instructorId, period } = opts;
+  const startDate = getStartDate(period);
+
+  // Get all course IDs for this instructor
+  const instructorCourses = db
     .select({ id: courses.id })
     .from(courses)
     .where(eq(courses.instructorId, instructorId))
     .all();
 
-  return rows.map((row) => row.id);
-}
+  const courseIds = instructorCourses.map((c) => c.id);
 
-function getSummary(
-  courseIds: number[],
-  periodStart: string | null
-): AnalyticsSummary {
   if (courseIds.length === 0) {
     return {
-      totalRevenueCents: 0,
+      totalRevenue: 0,
       totalEnrollments: 0,
       averageRating: null,
       ratingCount: 0,
     };
   }
 
+  // Build the IN clause for course IDs
+  const courseIdList = sql.join(
+    courseIds.map((id) => sql`${id}`),
+    sql`, `
+  );
+
+  // Total revenue
   const revenueResult = db
-    .select({ total: sql<number | null>`sum(${purchases.pricePaid})` })
+    .select({ total: sql<number>`coalesce(sum(${purchases.pricePaid}), 0)` })
     .from(purchases)
     .where(
-      periodStart
-        ? and(
-            inArray(purchases.courseId, courseIds),
-            gte(purchases.createdAt, periodStart)
-          )
-        : inArray(purchases.courseId, courseIds)
+      startDate
+        ? sql`${purchases.courseId} IN (${courseIdList}) AND ${purchases.createdAt} >= ${startDate}`
+        : sql`${purchases.courseId} IN (${courseIdList})`
     )
     .get();
 
+  // Total enrollments
   const enrollmentResult = db
     .select({ count: sql<number>`count(*)` })
     .from(enrollments)
     .where(
-      periodStart
-        ? and(
-            inArray(enrollments.courseId, courseIds),
-            gte(enrollments.enrolledAt, periodStart)
-          )
-        : inArray(enrollments.courseId, courseIds)
+      startDate
+        ? sql`${enrollments.courseId} IN (${courseIdList}) AND ${enrollments.enrolledAt} >= ${startDate}`
+        : sql`${enrollments.courseId} IN (${courseIdList})`
     )
     .get();
 
+  // Average rating and count
   const ratingResult = db
     .select({
-      average: sql<number | null>`avg(${courseRatings.rating})`,
+      avg: sql<number | null>`avg(${courseRatings.rating})`,
       count: sql<number>`count(*)`,
     })
     .from(courseRatings)
     .where(
-      periodStart
-        ? and(
-            inArray(courseRatings.courseId, courseIds),
-            gte(courseRatings.createdAt, periodStart)
-          )
-        : inArray(courseRatings.courseId, courseIds)
+      startDate
+        ? sql`${courseRatings.courseId} IN (${courseIdList}) AND ${courseRatings.createdAt} >= ${startDate}`
+        : sql`${courseRatings.courseId} IN (${courseIdList})`
     )
     .get();
 
   return {
-    totalRevenueCents: revenueResult?.total ?? 0,
+    totalRevenue: revenueResult?.total ?? 0,
     totalEnrollments: enrollmentResult?.count ?? 0,
-    averageRating: ratingResult?.average
-      ? Math.round(ratingResult.average * 10) / 10
-      : null,
+    averageRating: ratingResult?.avg ?? null,
     ratingCount: ratingResult?.count ?? 0,
-  };
-}
-
-export function getInstructorAnalytics(
-  instructorId: number,
-  period: AnalyticsPeriod
-): InstructorAnalytics {
-  const courseIds = getCourseIdsForInstructor(instructorId);
-  const periodStart = getPeriodStartDate(period);
-
-  return {
-    summary: getSummary(courseIds, periodStart),
   };
 }
