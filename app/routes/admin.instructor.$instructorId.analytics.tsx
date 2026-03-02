@@ -1,9 +1,7 @@
 import { Link, data, isRouteErrorResponse } from "react-router";
-import { z } from "zod";
 import type { Route } from "./+types/admin.instructor.$instructorId.analytics";
 import { getCurrentUserId } from "~/lib/session";
 import { getUserById } from "~/services/userService";
-import { parseParams } from "~/lib/validation";
 import { UserRole } from "~/db/schema";
 import {
   getAnalyticsSummary,
@@ -16,10 +14,6 @@ import { AlertTriangle } from "lucide-react";
 import { Button } from "~/components/ui/button";
 
 const VALID_PERIODS: TimePeriod[] = ["7d", "30d", "12m", "all"];
-
-const paramsSchema = z.object({
-  instructorId: z.coerce.number().int(),
-});
 
 export function meta() {
   return [
@@ -41,10 +35,15 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     throw data("Only admins can access this page.", { status: 403 });
   }
 
-  const { instructorId } = parseParams(params, paramsSchema);
+  const instructorId = Number(params.instructorId);
+
+  if (!Number.isInteger(instructorId) || instructorId <= 0) {
+    throw data("Invalid instructor ID.", { status: 400 });
+  }
 
   const instructor = getUserById(instructorId);
-  if (!instructor || instructor.role !== UserRole.Instructor) {
+
+  if (!instructor) {
     throw data("Instructor not found.", { status: 404 });
   }
 
@@ -58,13 +57,19 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const timeSeries = getRevenueTimeSeries({ instructorId, period });
   const courseBreakdown = getCourseBreakdown({ instructorId, period });
 
-  return { summary, timeSeries, courseBreakdown, period, instructor };
+  return {
+    summary,
+    timeSeries,
+    courseBreakdown,
+    period,
+    instructorName: instructor.name,
+  };
 }
 
 export default function AdminInstructorAnalytics({
   loaderData,
 }: Route.ComponentProps) {
-  const { summary, timeSeries, courseBreakdown, period, instructor } =
+  const { summary, timeSeries, courseBreakdown, period, instructorName } =
     loaderData;
 
   return (
@@ -78,13 +83,13 @@ export default function AdminInstructorAnalytics({
           Manage Users
         </Link>
         <span className="mx-2">/</span>
-        <span className="text-foreground">Analytics</span>
+        <span className="text-foreground">{instructorName} — Analytics</span>
       </nav>
 
       <div className="mb-8">
-        <h1 className="text-3xl font-bold">{instructor.name}'s Analytics</h1>
+        <h1 className="text-3xl font-bold">{instructorName} — Analytics</h1>
         <p className="mt-1 text-muted-foreground">
-          Track this instructor's course revenue, enrollments, and ratings
+          Revenue, enrollments, and ratings for this instructor
         </p>
       </div>
 
@@ -116,11 +121,11 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
           ? error.data
           : "You don't have permission to access this page.";
     } else if (error.status === 404) {
-      title = "Instructor not found";
+      title = "Not found";
       message =
         typeof error.data === "string"
           ? error.data
-          : "This instructor could not be found.";
+          : "The requested instructor was not found.";
     } else {
       title = `Error ${error.status}`;
       message = typeof error.data === "string" ? error.data : error.statusText;

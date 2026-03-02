@@ -3,11 +3,7 @@ import { useFetcher } from "react-router";
 import { toast } from "sonner";
 import { z } from "zod";
 import type { Route } from "./+types/admin.users";
-import {
-  getAllUsers,
-  updateUser,
-  updateUserRole,
-} from "~/services/userService";
+import { getAllUsers, updateUser, updateUserRole } from "~/services/userService";
 import { getCurrentUserId } from "~/lib/session";
 import { getUserById } from "~/services/userService";
 import { parseFormData } from "~/lib/validation";
@@ -22,7 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "~/components/ui/select";
-import { AlertTriangle, Pencil, Shield, Users } from "lucide-react";
+import { AlertTriangle, BarChart3, Pencil, Shield, Users } from "lucide-react";
 import { data, isRouteErrorResponse, Link } from "react-router";
 
 const adminUserActionSchema = z.discriminatedUnion("intent", [
@@ -84,10 +80,7 @@ export async function action({ request }: Route.ActionArgs) {
   const parsed = parseFormData(formData, adminUserActionSchema);
 
   if (!parsed.success) {
-    return data(
-      { error: Object.values(parsed.errors)[0] ?? "Invalid input." },
-      { status: 400 }
-    );
+    return data({ error: Object.values(parsed.errors)[0] ?? "Invalid input." }, { status: 400 });
   }
 
   const { intent } = parsed.data;
@@ -295,14 +288,6 @@ function EditableUserRow({
           </div>
         ) : (
           <div className="flex items-center gap-1">
-            {user.role === UserRole.Instructor && (
-              <Link
-                to={`/admin/instructor/${user.id}/analytics`}
-                className="flex h-7 items-center rounded-md px-2 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
-              >
-                View Analytics
-              </Link>
-            )}
             <Button
               variant="ghost"
               size="sm"
@@ -311,6 +296,18 @@ function EditableUserRow({
             >
               <Pencil className="size-3.5" />
             </Button>
+            {user.role === UserRole.Instructor && (
+              <Link to={`/admin/instructor/${user.id}/analytics`}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  <BarChart3 className="size-3.5" />
+                  View Analytics
+                </Button>
+              </Link>
+            )}
           </div>
         )}
       </td>
@@ -321,21 +318,11 @@ function EditableUserRow({
 function TableRowSkeleton() {
   return (
     <tr className="border-b border-border last:border-0">
-      <td className="px-4 py-3">
-        <Skeleton className="h-4 w-28" />
-      </td>
-      <td className="px-4 py-3">
-        <Skeleton className="h-4 w-40" />
-      </td>
-      <td className="px-4 py-3">
-        <Skeleton className="h-8 w-32" />
-      </td>
-      <td className="px-4 py-3">
-        <Skeleton className="h-4 w-24" />
-      </td>
-      <td className="px-4 py-3">
-        <Skeleton className="size-7" />
-      </td>
+      <td className="px-4 py-3"><Skeleton className="h-4 w-28" /></td>
+      <td className="px-4 py-3"><Skeleton className="h-4 w-40" /></td>
+      <td className="px-4 py-3"><Skeleton className="h-8 w-32" /></td>
+      <td className="px-4 py-3"><Skeleton className="h-4 w-24" /></td>
+      <td className="px-4 py-3"><Skeleton className="size-7" /></td>
     </tr>
   );
 }
@@ -354,21 +341,11 @@ export function HydrateFallback() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-border bg-muted/50">
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    Name
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    Email
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    Role
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    Created
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    Actions
-                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">Name</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">Email</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">Role</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">Created</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -464,16 +441,10 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
   if (isRouteErrorResponse(error)) {
     if (error.status === 401) {
       title = "Sign in required";
-      message =
-        typeof error.data === "string"
-          ? error.data
-          : "Please select a user from the DevUI panel.";
+      message = typeof error.data === "string" ? error.data : "Please select a user from the DevUI panel.";
     } else if (error.status === 403) {
       title = "Access denied";
-      message =
-        typeof error.data === "string"
-          ? error.data
-          : "Only admins can access this page.";
+      message = typeof error.data === "string" ? error.data : "Only admins can access this page.";
     } else {
       title = `Error ${error.status}`;
       message = typeof error.data === "string" ? error.data : error.statusText;

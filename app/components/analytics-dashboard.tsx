@@ -1,17 +1,25 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import {
-  Line,
   LineChart,
-  CartesianGrid,
+  Line,
   XAxis,
   YAxis,
+  CartesianGrid,
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { cn, formatPrice } from "~/lib/utils";
-import { DollarSign, Users, Star, ArrowUpDown, BarChart3 } from "lucide-react";
+import {
+  DollarSign,
+  Users,
+  Star,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
+  PackageOpen,
+} from "lucide-react";
 import type {
   TimePeriod,
   AnalyticsSummary,
@@ -26,44 +34,32 @@ const PERIODS: { value: TimePeriod; label: string }[] = [
   { value: "all", label: "All time" },
 ];
 
-type SortColumn = keyof Pick<
-  CourseBreakdown,
-  | "title"
-  | "listPrice"
-  | "revenue"
-  | "salesCount"
-  | "enrollmentCount"
-  | "averageRating"
-  | "ratingCount"
->;
-
-const COLUMNS: { key: SortColumn; label: string }[] = [
-  { key: "title", label: "Course" },
-  { key: "listPrice", label: "List Price" },
-  { key: "revenue", label: "Revenue" },
-  { key: "salesCount", label: "Sales" },
-  { key: "enrollmentCount", label: "Enrollments" },
-  { key: "averageRating", label: "Avg Rating" },
-  { key: "ratingCount", label: "Ratings" },
-];
-
-function formatChartDate(date: string): string {
-  return date.length === 7
-    ? new Date(`${date}-01T00:00:00`).toLocaleDateString("en-US", {
-        month: "short",
-        year: "numeric",
-      })
-    : new Date(`${date}T00:00:00`).toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-      });
-}
-
 interface AnalyticsDashboardProps {
   summary: AnalyticsSummary;
   timeSeries: RevenueDataPoint[];
   courseBreakdown: CourseBreakdown[];
   period: TimePeriod;
+}
+
+type SortField = keyof Pick<
+  CourseBreakdown,
+  | "revenue"
+  | "salesCount"
+  | "enrollmentCount"
+  | "averageRating"
+  | "ratingCount"
+  | "listPrice"
+  | "title"
+>;
+type SortDirection = "asc" | "desc";
+
+function formatChartRevenue(cents: number): string {
+  if (cents === 0) return "$0";
+  return `$${(cents / 100).toFixed(0)}`;
+}
+
+function formatTooltipRevenue(cents: number): string {
+  return formatPrice(cents);
 }
 
 export function AnalyticsDashboard({
@@ -74,36 +70,8 @@ export function AnalyticsDashboard({
 }: AnalyticsDashboardProps) {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const [sortColumn, setSortColumn] = useState<SortColumn>("revenue");
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
-
-  const sortedCourses = useMemo(() => {
-    const sorted = [...courseBreakdown].sort((a, b) => {
-      const aValue = a[sortColumn];
-      const bValue = b[sortColumn];
-
-      if (aValue === null && bValue === null) return 0;
-      if (aValue === null) return 1;
-      if (bValue === null) return -1;
-
-      if (typeof aValue === "string" || typeof bValue === "string") {
-        return String(aValue).localeCompare(String(bValue));
-      }
-      return (aValue as number) - (bValue as number);
-    });
-
-    if (sortDirection === "desc") sorted.reverse();
-    return sorted;
-  }, [courseBreakdown, sortColumn, sortDirection]);
-
-  function handleSort(column: SortColumn) {
-    if (column === sortColumn) {
-      setSortDirection((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortColumn(column);
-      setSortDirection("desc");
-    }
-  }
+  const [sortField, setSortField] = useState<SortField>("revenue");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
   function handlePeriodChange(newPeriod: TimePeriod) {
     const params = new URLSearchParams(searchParams);
@@ -111,207 +79,308 @@ export function AnalyticsDashboard({
     navigate(`?${params.toString()}`, { replace: true });
   }
 
-  const hasNoCourses = courseBreakdown.length === 0;
-  const hasNoData =
-    summary.totalRevenue === 0 &&
-    summary.totalEnrollments === 0 &&
-    summary.ratingCount === 0;
-  const isEmpty = hasNoCourses || hasNoData;
+  function handleSort(field: SortField) {
+    if (sortField === field) {
+      setSortDirection((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortField(field);
+      setSortDirection("desc");
+    }
+  }
 
-  const periodSelector = (
-    <div className="flex gap-1 rounded-lg bg-muted p-1">
-      {PERIODS.map((p) => (
-        <button
-          key={p.value}
-          onClick={() => handlePeriodChange(p.value)}
-          className={cn(
-            "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-            period === p.value
-              ? "bg-background text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground"
-          )}
-        >
-          {p.label}
-        </button>
-      ))}
-    </div>
-  );
+  const sortedCourses = [...courseBreakdown].sort((a, b) => {
+    const aVal = a[sortField];
+    const bVal = b[sortField];
 
-  if (isEmpty) {
-    return (
-      <div className="space-y-6">
-        {periodSelector}
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-16 text-center">
-            <BarChart3 className="mb-4 size-10 text-muted-foreground/50" />
-            <p className="text-muted-foreground">
-              No revenue data yet. Publish a course to start tracking analytics.
-            </p>
-          </CardContent>
-        </Card>
-      </div>
+    // Handle null averageRating — sort nulls last
+    if (aVal === null && bVal === null) return 0;
+    if (aVal === null) return 1;
+    if (bVal === null) return -1;
+
+    if (typeof aVal === "string" && typeof bVal === "string") {
+      return sortDirection === "asc"
+        ? aVal.localeCompare(bVal)
+        : bVal.localeCompare(aVal);
+    }
+
+    return sortDirection === "asc"
+      ? (aVal as number) - (bVal as number)
+      : (bVal as number) - (aVal as number);
+  });
+
+  function SortIcon({ field }: { field: SortField }) {
+    if (sortField !== field) {
+      return (
+        <ArrowUpDown className="ml-1 inline size-3 text-muted-foreground" />
+      );
+    }
+    return sortDirection === "asc" ? (
+      <ArrowUp className="ml-1 inline size-3" />
+    ) : (
+      <ArrowDown className="ml-1 inline size-3" />
     );
   }
 
   return (
     <div className="space-y-6">
       {/* Period Selector */}
-      {periodSelector}
-
-      {/* Summary Cards */}
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Total Revenue
-            </CardTitle>
-            <DollarSign className="size-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {formatPrice(summary.totalRevenue)}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Total Enrollments
-            </CardTitle>
-            <Users className="size-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {summary.totalEnrollments.toLocaleString()}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Average Rating
-            </CardTitle>
-            <Star className="size-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {summary.averageRating !== null
-                ? `${summary.averageRating.toFixed(1)} / 5`
-                : "N/A"}
-            </div>
-            {summary.ratingCount > 0 && (
-              <p className="text-xs text-muted-foreground">
-                from {summary.ratingCount}{" "}
-                {summary.ratingCount === 1 ? "rating" : "ratings"}
-              </p>
+      <div className="flex gap-1 rounded-lg bg-muted p-1">
+        {PERIODS.map((p) => (
+          <button
+            key={p.value}
+            onClick={() => handlePeriodChange(p.value)}
+            className={cn(
+              "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+              period === p.value
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
             )}
-          </CardContent>
-        </Card>
+          >
+            {p.label}
+          </button>
+        ))}
       </div>
 
-      {/* Revenue Chart */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm font-medium text-muted-foreground">
-            Revenue Over Time
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {timeSeries.length === 0 ? (
-            <p className="py-12 text-center text-sm text-muted-foreground">
-              No revenue data for this period.
+      {/* Empty state: no courses */}
+      {courseBreakdown.length === 0 && (
+        <Card>
+          <CardContent className="py-12 text-center">
+            <PackageOpen className="mx-auto mb-3 size-10 text-muted-foreground/50" />
+            <h3 className="mb-1 text-lg font-semibold">
+              No analytics data yet
+            </h3>
+            <p className="text-sm text-muted-foreground">
+              Publish a course to start tracking revenue, enrollments, and
+              ratings.
             </p>
-          ) : (
-            <div className="h-72 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={timeSeries}>
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    className="stroke-muted"
-                  />
-                  <XAxis
-                    dataKey="date"
-                    tickFormatter={formatChartDate}
-                    tick={{ fontSize: 12 }}
-                    className="fill-muted-foreground"
-                  />
-                  <YAxis
-                    tickFormatter={(value) => formatPrice(value)}
-                    tick={{ fontSize: 12 }}
-                    className="fill-muted-foreground"
-                    width={80}
-                  />
-                  <Tooltip
-                    formatter={(value) => formatPrice(Number(value))}
-                    labelFormatter={(label) => formatChartDate(String(label))}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="revenue"
-                    stroke="var(--color-primary, #6366f1)"
-                    strokeWidth={2}
-                    dot={false}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
 
-      {/* Per-Course Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm font-medium text-muted-foreground">
-            Course Breakdown
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b text-left">
-                  {COLUMNS.map((column) => (
-                    <th key={column.key} className="pb-2 pr-4">
-                      <button
-                        onClick={() => handleSort(column.key)}
-                        className={cn(
-                          "flex items-center gap-1 font-medium text-muted-foreground hover:text-foreground",
-                          sortColumn === column.key && "text-foreground"
-                        )}
-                      >
-                        {column.label}
-                        <ArrowUpDown className="size-3" />
-                      </button>
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {sortedCourses.map((course) => (
-                  <tr key={course.courseId} className="border-b last:border-0">
-                    <td className="py-2 pr-4">{course.title}</td>
-                    <td className="py-2 pr-4">
-                      {formatPrice(course.listPrice)}
-                    </td>
-                    <td className="py-2 pr-4">{formatPrice(course.revenue)}</td>
-                    <td className="py-2 pr-4">{course.salesCount}</td>
-                    <td className="py-2 pr-4">{course.enrollmentCount}</td>
-                    <td className="py-2 pr-4">
-                      {course.averageRating !== null
-                        ? course.averageRating.toFixed(1)
-                        : "N/A"}
-                    </td>
-                    <td className="py-2 pr-4">{course.ratingCount}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      {courseBreakdown.length > 0 && (
+        <>
+          {/* Summary Cards */}
+          <div className="grid gap-4 sm:grid-cols-3">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Total Revenue
+                </CardTitle>
+                <DollarSign className="size-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {formatPrice(summary.totalRevenue)}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Total Enrollments
+                </CardTitle>
+                <Users className="size-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {summary.totalEnrollments.toLocaleString()}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Average Rating
+                </CardTitle>
+                <Star className="size-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {summary.averageRating !== null
+                    ? `${summary.averageRating.toFixed(1)} / 5`
+                    : "N/A"}
+                </div>
+                {summary.ratingCount > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    from {summary.ratingCount}{" "}
+                    {summary.ratingCount === 1 ? "rating" : "ratings"}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
           </div>
-        </CardContent>
-      </Card>
+
+          {/* Revenue Chart */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Revenue Over Time</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {timeSeries.length > 0 ? (
+                <ResponsiveContainer width="100%" height={300}>
+                  <LineChart data={timeSeries}>
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      stroke="var(--border)"
+                    />
+                    <XAxis
+                      dataKey="date"
+                      tick={{ fontSize: 12, fill: "var(--muted-foreground)" }}
+                      tickLine={false}
+                      axisLine={false}
+                    />
+                    <YAxis
+                      tickFormatter={formatChartRevenue}
+                      tick={{ fontSize: 12, fill: "var(--muted-foreground)" }}
+                      tickLine={false}
+                      axisLine={false}
+                      width={60}
+                    />
+                    <Tooltip
+                      formatter={(value) => [
+                        formatTooltipRevenue(value as number),
+                        "Revenue",
+                      ]}
+                      labelFormatter={(label) => `Date: ${label}`}
+                      contentStyle={{
+                        backgroundColor: "var(--card)",
+                        border: "1px solid var(--border)",
+                        borderRadius: "var(--radius)",
+                      }}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="revenue"
+                      stroke="var(--primary)"
+                      strokeWidth={2}
+                      dot={false}
+                      activeDot={{ r: 4 }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex h-[300px] items-center justify-center text-muted-foreground">
+                  No revenue data for this period.
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Per-Course Table */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Per-Course Breakdown</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-left">
+                      <th className="pb-3 pr-4 font-medium">
+                        <button
+                          onClick={() => handleSort("title")}
+                          className="inline-flex items-center hover:text-foreground"
+                        >
+                          Course
+                          <SortIcon field="title" />
+                        </button>
+                      </th>
+                      <th className="pb-3 pr-4 text-right font-medium">
+                        <button
+                          onClick={() => handleSort("listPrice")}
+                          className="inline-flex items-center hover:text-foreground"
+                        >
+                          List Price
+                          <SortIcon field="listPrice" />
+                        </button>
+                      </th>
+                      <th className="pb-3 pr-4 text-right font-medium">
+                        <button
+                          onClick={() => handleSort("revenue")}
+                          className="inline-flex items-center hover:text-foreground"
+                        >
+                          Revenue
+                          <SortIcon field="revenue" />
+                        </button>
+                      </th>
+                      <th className="pb-3 pr-4 text-right font-medium">
+                        <button
+                          onClick={() => handleSort("salesCount")}
+                          className="inline-flex items-center hover:text-foreground"
+                        >
+                          Sales
+                          <SortIcon field="salesCount" />
+                        </button>
+                      </th>
+                      <th className="pb-3 pr-4 text-right font-medium">
+                        <button
+                          onClick={() => handleSort("enrollmentCount")}
+                          className="inline-flex items-center hover:text-foreground"
+                        >
+                          Enrollments
+                          <SortIcon field="enrollmentCount" />
+                        </button>
+                      </th>
+                      <th className="pb-3 pr-4 text-right font-medium">
+                        <button
+                          onClick={() => handleSort("averageRating")}
+                          className="inline-flex items-center hover:text-foreground"
+                        >
+                          Avg Rating
+                          <SortIcon field="averageRating" />
+                        </button>
+                      </th>
+                      <th className="pb-3 text-right font-medium">
+                        <button
+                          onClick={() => handleSort("ratingCount")}
+                          className="inline-flex items-center hover:text-foreground"
+                        >
+                          Ratings
+                          <SortIcon field="ratingCount" />
+                        </button>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortedCourses.map((course) => (
+                      <tr
+                        key={course.courseId}
+                        className="border-b last:border-0"
+                      >
+                        <td className="py-3 pr-4 font-medium">
+                          {course.title}
+                        </td>
+                        <td className="py-3 pr-4 text-right">
+                          {formatPrice(course.listPrice)}
+                        </td>
+                        <td className="py-3 pr-4 text-right">
+                          {formatPrice(course.revenue)}
+                        </td>
+                        <td className="py-3 pr-4 text-right">
+                          {course.salesCount.toLocaleString()}
+                        </td>
+                        <td className="py-3 pr-4 text-right">
+                          {course.enrollmentCount.toLocaleString()}
+                        </td>
+                        <td className="py-3 pr-4 text-right">
+                          {course.averageRating !== null
+                            ? course.averageRating.toFixed(1)
+                            : "N/A"}
+                        </td>
+                        <td className="py-3 text-right">
+                          {course.ratingCount.toLocaleString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      )}
     </div>
   );
 }
