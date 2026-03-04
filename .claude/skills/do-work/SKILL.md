@@ -1,49 +1,35 @@
 ---
 name: do-work
-description: Carry a single unit of work from plan to committed code — plan it, implement it, verify it with pnpm typecheck and pnpm run test, then commit. Use when the user hands you one discrete task, phase, or ticket to complete end-to-end (e.g. "do this phase", "implement X", a plan phase from prd-to-plan).
+description: "Execute a unit of work end-to-end: plan, implement, validate with typecheck and tests, then commit. Use when user wants to do work, build a feature, fix a bug, or implement a phase from a plan."
 ---
 
 # Do Work
 
-Take one discrete unit of work (a task description, plan phase, or ticket) from plan to committed code, autonomously.
+Execute a complete unit of work: plan it, build it, validate it, commit it.
 
-## Process
+## Workflow
 
-### 1. Plan (optional)
+### 1. Understand the task
+
+Read any referenced plan or PRD. Explore the codebase to understand the relevant files, patterns, and conventions. If the task is ambiguous, ask the user to clarify scope before proceeding.
+
+### 2. Plan the implementation (optional)
 
 If the task has not already been planned, create a plan for it.
 
+### 3. Implement
 
-### 2. Implement
+Work through the plan step by step.
 
-Make the change following the plan and this repo's coding standards. Keep the diff scoped to the unit of work — no unrelated cleanup or drive-by refactors.
+### 4. Validate
 
-### 3. Feedback loop
-
-Run, in order:
+Run the feedback loops and fix any issues. Repeat until both pass cleanly.
 
 ```
-pnpm typecheck
+pnpm run typecheck
 pnpm run test
 ```
 
-If either fails:
-1. Read the failure output.
-2. Fix the root cause (not the check).
-3. Re-run both commands.
+### 5. Commit
 
-Repeat until both pass. Do not proceed to commit with a red loop.
-
-### 4. Commit
-
-Once typecheck and tests are both green:
-
-- `git status` and `git diff` to review exactly what changed.
-- Stage only the files touched by this unit of work.
-- Commit with a message describing why the change was made, not just what changed.
-- Do not push.
-
-## Notes
-
-- This skill assumes an existing git repository and a working `pnpm` setup. If `pnpm` is missing, use the `pnpm-not-found` skill first.
-- If the unit of work is one phase of a larger plan (e.g. from `prd-to-plan`), treat only that phase as in scope — later phases are out of scope even if related code is nearby.
+Once typecheck and tests pass, commit the work.
