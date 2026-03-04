@@ -53,12 +53,11 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const isInstructor = currentUser?.role === UserRole.Instructor;
   const userIsTeamAdmin = currentUserId ? isTeamAdmin(currentUserId) : false;
-  const shouldShowNotifications =
-    (isInstructor || userIsTeamAdmin) && currentUserId;
-  const notifications = shouldShowNotifications
+  const showNotifications = (isInstructor || userIsTeamAdmin) && currentUserId;
+  const notifications = showNotifications
     ? getNotifications(currentUserId, 5, 0)
     : [];
-  const notificationUnreadCount = shouldShowNotifications
+  const notificationUnreadCount = showNotifications
     ? getUnreadCount(currentUserId)
     : 0;
 
