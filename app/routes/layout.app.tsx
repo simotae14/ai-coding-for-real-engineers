@@ -13,7 +13,10 @@ import {
 } from "~/services/progressService";
 import { getCountryTierInfo, COUNTRIES } from "~/lib/ppp";
 import { isTeamAdmin } from "~/services/teamService";
-import { getNotifications, getUnreadCount } from "~/services/notificationService";
+import {
+  getNotifications,
+  getUnreadCount,
+} from "~/services/notificationService";
 import { UserRole } from "~/db/schema";
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -49,12 +52,10 @@ export async function loader({ request }: Route.LoaderArgs) {
     : [];
 
   const isInstructor = currentUser?.role === UserRole.Instructor;
-  const notifications = isInstructor
-    ? getNotifications(currentUser!.id, 5, 0)
-    : [];
-  const unreadNotificationCount = isInstructor
-    ? getUnreadCount(currentUser!.id)
-    : 0;
+  const notifications =
+    isInstructor && currentUserId ? getNotifications(currentUserId, 5, 0) : [];
+  const notificationUnreadCount =
+    isInstructor && currentUserId ? getUnreadCount(currentUserId) : 0;
 
   return {
     users: users.map((u) => ({ id: u.id, name: u.name, role: u.role })),
@@ -72,7 +73,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     countries: COUNTRIES,
     isTeamAdmin: currentUserId ? isTeamAdmin(currentUserId) : false,
     notifications,
-    unreadNotificationCount,
+    notificationUnreadCount,
   };
 }
 
@@ -86,7 +87,7 @@ export default function AppLayout({ loaderData }: Route.ComponentProps) {
     countries,
     isTeamAdmin: userIsTeamAdmin,
     notifications,
-    unreadNotificationCount,
+    notificationUnreadCount,
   } = loaderData;
 
   return (
@@ -96,7 +97,7 @@ export default function AppLayout({ loaderData }: Route.ComponentProps) {
         recentCourses={recentCourses}
         isTeamAdmin={userIsTeamAdmin}
         notifications={notifications}
-        unreadNotificationCount={unreadNotificationCount}
+        notificationUnreadCount={notificationUnreadCount}
       />
       <main className="flex-1 overflow-y-auto">
         <Outlet />

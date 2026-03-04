@@ -3,7 +3,6 @@ import { useState, useEffect } from "react";
 import { cn } from "~/lib/utils";
 import { UserRole } from "~/db/schema";
 import { UserAvatar } from "~/components/user-avatar";
-import { NotificationBell } from "~/components/notification-bell";
 import {
   BarChart3,
   BookOpen,
@@ -18,6 +17,7 @@ import {
   LogOut,
   Settings,
 } from "lucide-react";
+import { NotificationBell } from "~/components/notification-bell";
 
 interface CurrentUser {
   id: number;
@@ -50,7 +50,7 @@ interface SidebarProps {
   recentCourses?: RecentCourse[];
   isTeamAdmin?: boolean;
   notifications?: NotificationItem[];
-  unreadNotificationCount?: number;
+  notificationUnreadCount?: number;
 }
 
 interface NavItem {
@@ -116,10 +116,9 @@ export function Sidebar({
   recentCourses = [],
   isTeamAdmin = false,
   notifications = [],
-  unreadNotificationCount = 0,
+  notificationUnreadCount = 0,
 }: SidebarProps) {
   const currentUserRole = currentUser?.role ?? null;
-  const isInstructor = currentUserRole === UserRole.Instructor;
   const [isDark, setIsDark] = useState(false);
 
   useEffect(() => {
@@ -141,10 +140,10 @@ export function Sidebar({
         <NavLink to="/" className="text-lg font-bold tracking-tight">
           Cadence
         </NavLink>
-        {isInstructor && (
+        {currentUser?.role === UserRole.Instructor && (
           <NotificationBell
             notifications={notifications}
-            unreadCount={unreadNotificationCount}
+            unreadCount={notificationUnreadCount}
           />
         )}
       </div>

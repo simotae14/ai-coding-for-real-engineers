@@ -1,10 +1,6 @@
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, sql, desc } from "drizzle-orm";
 import { db } from "~/db";
 import { notifications, NotificationType } from "~/db/schema";
-
-// ─── Notification Service ───
-// Handles creation, retrieval, and read-state of user notifications.
-// Uses positional parameters (project convention).
 
 export function createNotification(
   recipientUserId: number,
@@ -25,18 +21,10 @@ export function getNotifications(userId: number, limit: number, offset: number) 
     .select()
     .from(notifications)
     .where(eq(notifications.recipientUserId, userId))
-    .orderBy(desc(notifications.createdAt), desc(notifications.id))
+    .orderBy(desc(notifications.id))
     .limit(limit)
     .offset(offset)
     .all();
-}
-
-export function getNotificationById(notificationId: number) {
-  return db
-    .select()
-    .from(notifications)
-    .where(eq(notifications.id, notificationId))
-    .get();
 }
 
 export function getUnreadCount(userId: number) {
@@ -44,10 +32,7 @@ export function getUnreadCount(userId: number) {
     .select({ count: sql<number>`count(*)` })
     .from(notifications)
     .where(
-      and(
-        eq(notifications.recipientUserId, userId),
-        eq(notifications.isRead, false)
-      )
+      sql`${notifications.recipientUserId} = ${userId} AND ${notifications.isRead} = 0`
     )
     .get();
 

@@ -275,19 +275,6 @@ export const lessonComments = sqliteTable("lesson_comments", {
   deletedAt: text("deleted_at"),
 });
 
-export const lessonBookmarks = sqliteTable("lesson_bookmarks", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  userId: integer("user_id")
-    .notNull()
-    .references(() => users.id),
-  lessonId: integer("lesson_id")
-    .notNull()
-    .references(() => lessons.id),
-  createdAt: text("created_at")
-    .notNull()
-    .$defaultFn(() => new Date().toISOString()),
-});
-
 export const notifications = sqliteTable("notifications", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   recipientUserId: integer("recipient_user_id")
@@ -298,6 +285,19 @@ export const notifications = sqliteTable("notifications", {
   message: text("message").notNull(),
   linkUrl: text("link_url").notNull(),
   isRead: integer("is_read", { mode: "boolean" }).notNull().default(false),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+export const lessonBookmarks = sqliteTable("lesson_bookmarks", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => users.id),
+  lessonId: integer("lesson_id")
+    .notNull()
+    .references(() => lessons.id),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),

@@ -2,11 +2,8 @@ import { data } from "react-router";
 import { z } from "zod";
 import type { Route } from "./+types/api.notifications.mark-read";
 import { getCurrentUserId } from "~/lib/session";
-import {
-  getNotificationById,
-  markAsRead,
-} from "~/services/notificationService";
 import { parseJsonBody } from "~/lib/validation";
+import { markAsRead, getNotifications } from "~/services/notificationService";
 
 const markReadSchema = z.object({
   notificationId: z.number(),
@@ -26,9 +23,11 @@ export async function action({ request }: Route.ActionArgs) {
 
   const { notificationId } = parsed.data;
 
-  const notification = getNotificationById(notificationId);
-  if (!notification || notification.recipientUserId !== currentUserId) {
-    throw data("Notification not found", { status: 404 });
+  // Verify the notification belongs to the current user
+  const notifications = getNotifications(currentUserId, 1000, 0);
+  const owns = notifications.some((n) => n.id === notificationId);
+  if (!owns) {
+    throw data("Not found", { status: 404 });
   }
 
   markAsRead(notificationId);

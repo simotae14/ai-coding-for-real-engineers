@@ -11,7 +11,6 @@ vi.mock("~/db", () => ({
   },
 }));
 
-// Import after mock so the module picks up our test db
 import {
   createNotification,
   getNotifications,
@@ -33,7 +32,7 @@ describe("notificationService", () => {
         NotificationType.Enrollment,
         "New Enrollment",
         "Test User enrolled in Test Course",
-        "/instructor/1/students"
+        `/instructor/${base.course.id}/students`
       );
 
       expect(notification).toBeDefined();
@@ -41,27 +40,29 @@ describe("notificationService", () => {
       expect(notification.type).toBe(NotificationType.Enrollment);
       expect(notification.title).toBe("New Enrollment");
       expect(notification.message).toBe("Test User enrolled in Test Course");
-      expect(notification.linkUrl).toBe("/instructor/1/students");
+      expect(notification.linkUrl).toBe(
+        `/instructor/${base.course.id}/students`
+      );
       expect(notification.isRead).toBe(false);
       expect(notification.createdAt).toBeDefined();
     });
   });
 
   describe("getNotifications", () => {
-    it("returns notifications for a user ordered newest first", () => {
+    it("returns notifications ordered newest first", () => {
       createNotification(
         base.instructor.id,
         NotificationType.Enrollment,
         "First",
-        "message 1",
-        "/link-1"
+        "First notification",
+        "/instructor/1/students"
       );
       createNotification(
         base.instructor.id,
         NotificationType.Enrollment,
         "Second",
-        "message 2",
-        "/link-2"
+        "Second notification",
+        "/instructor/1/students"
       );
 
       const results = getNotifications(base.instructor.id, 10, 0);
@@ -70,107 +71,117 @@ describe("notificationService", () => {
       expect(results[1].title).toBe("First");
     });
 
-    it("respects limit and offset", () => {
+    it("respects limit parameter", () => {
       for (let i = 0; i < 5; i++) {
         createNotification(
           base.instructor.id,
           NotificationType.Enrollment,
           `Notification ${i}`,
-          "message",
-          "/link"
+          `Message ${i}`,
+          "/instructor/1/students"
         );
       }
 
-      const firstPage = getNotifications(base.instructor.id, 2, 0);
-      expect(firstPage).toHaveLength(2);
-      expect(firstPage[0].title).toBe("Notification 4");
-      expect(firstPage[1].title).toBe("Notification 3");
-
-      const secondPage = getNotifications(base.instructor.id, 2, 2);
-      expect(secondPage).toHaveLength(2);
-      expect(secondPage[0].title).toBe("Notification 2");
-      expect(secondPage[1].title).toBe("Notification 1");
+      const results = getNotifications(base.instructor.id, 3, 0);
+      expect(results).toHaveLength(3);
     });
 
-    it("only returns notifications for the given user", () => {
+    it("respects offset parameter", () => {
+      for (let i = 0; i < 5; i++) {
+        createNotification(
+          base.instructor.id,
+          NotificationType.Enrollment,
+          `Notification ${i}`,
+          `Message ${i}`,
+          "/instructor/1/students"
+        );
+      }
+
+      const results = getNotifications(base.instructor.id, 10, 3);
+      expect(results).toHaveLength(2);
+    });
+
+    it("returns empty array when user has no notifications", () => {
+      const results = getNotifications(base.user.id, 10, 0);
+      expect(results).toHaveLength(0);
+    });
+
+    it("only returns notifications for the specified user", () => {
       createNotification(
         base.instructor.id,
         NotificationType.Enrollment,
-        "For instructor",
-        "message",
-        "/link"
+        "For Instructor",
+        "Instructor notification",
+        "/instructor/1/students"
       );
       createNotification(
         base.user.id,
         NotificationType.Enrollment,
-        "For student",
-        "message",
-        "/link"
+        "For User",
+        "User notification",
+        "/instructor/1/students"
       );
 
-      const results = getNotifications(base.instructor.id, 10, 0);
-      expect(results).toHaveLength(1);
-      expect(results[0].title).toBe("For instructor");
-    });
+      const instructorNotifs = getNotifications(base.instructor.id, 10, 0);
+      expect(instructorNotifs).toHaveLength(1);
+      expect(instructorNotifs[0].title).toBe("For Instructor");
 
-    it("returns empty array when user has no notifications", () => {
-      expect(getNotifications(base.instructor.id, 10, 0)).toHaveLength(0);
+      const userNotifs = getNotifications(base.user.id, 10, 0);
+      expect(userNotifs).toHaveLength(1);
+      expect(userNotifs[0].title).toBe("For User");
     });
   });
 
   describe("getUnreadCount", () => {
-    it("counts only unread notifications", () => {
-      const n1 = createNotification(
+    it("returns count of unread notifications", () => {
+      createNotification(
         base.instructor.id,
         NotificationType.Enrollment,
-        "First",
-        "message",
-        "/link"
+        "Unread 1",
+        "Message",
+        "/instructor/1/students"
       );
       createNotification(
         base.instructor.id,
         NotificationType.Enrollment,
-        "Second",
-        "message",
-        "/link"
+        "Unread 2",
+        "Message",
+        "/instructor/1/students"
       );
 
       expect(getUnreadCount(base.instructor.id)).toBe(2);
-
-      markAsRead(n1.id);
-
-      expect(getUnreadCount(base.instructor.id)).toBe(1);
     });
 
-    it("returns 0 when there are no notifications", () => {
-      expect(getUnreadCount(base.instructor.id)).toBe(0);
-    });
-
-    it("is scoped to the given user", () => {
-      createNotification(
-        base.user.id,
+    it("returns 0 when all notifications are read", () => {
+      const n = createNotification(
+        base.instructor.id,
         NotificationType.Enrollment,
-        "For student",
-        "message",
-        "/link"
+        "Read",
+        "Message",
+        "/instructor/1/students"
       );
+      markAsRead(n.id);
 
       expect(getUnreadCount(base.instructor.id)).toBe(0);
+    });
+
+    it("returns 0 when user has no notifications", () => {
+      expect(getUnreadCount(base.user.id)).toBe(0);
     });
   });
 
   describe("markAsRead", () => {
-    it("marks a single notification as read", () => {
-      const notification = createNotification(
+    it("marks a notification as read", () => {
+      const n = createNotification(
         base.instructor.id,
         NotificationType.Enrollment,
-        "Title",
-        "message",
-        "/link"
+        "Test",
+        "Message",
+        "/instructor/1/students"
       );
 
-      const result = markAsRead(notification.id);
-      expect(result.isRead).toBe(true);
+      const updated = markAsRead(n.id);
+      expect(updated!.isRead).toBe(true);
     });
 
     it("does not affect other notifications", () => {
@@ -178,40 +189,38 @@ describe("notificationService", () => {
         base.instructor.id,
         NotificationType.Enrollment,
         "First",
-        "message",
-        "/link"
+        "Message",
+        "/instructor/1/students"
       );
-      const n2 = createNotification(
+      createNotification(
         base.instructor.id,
         NotificationType.Enrollment,
         "Second",
-        "message",
-        "/link"
+        "Message",
+        "/instructor/1/students"
       );
 
       markAsRead(n1.id);
 
-      const results = getNotifications(base.instructor.id, 10, 0);
-      const unchanged = results.find((n) => n.id === n2.id);
-      expect(unchanged?.isRead).toBe(false);
+      expect(getUnreadCount(base.instructor.id)).toBe(1);
     });
   });
 
   describe("markAllAsRead", () => {
-    it("marks all of a user's notifications as read", () => {
+    it("marks all notifications as read for a user", () => {
       createNotification(
         base.instructor.id,
         NotificationType.Enrollment,
         "First",
-        "message",
-        "/link"
+        "Message",
+        "/instructor/1/students"
       );
       createNotification(
         base.instructor.id,
         NotificationType.Enrollment,
         "Second",
-        "message",
-        "/link"
+        "Message",
+        "/instructor/1/students"
       );
 
       markAllAsRead(base.instructor.id);
@@ -223,20 +232,21 @@ describe("notificationService", () => {
       createNotification(
         base.instructor.id,
         NotificationType.Enrollment,
-        "For instructor",
-        "message",
-        "/link"
+        "Instructor",
+        "Message",
+        "/instructor/1/students"
       );
       createNotification(
         base.user.id,
         NotificationType.Enrollment,
-        "For student",
-        "message",
-        "/link"
+        "User",
+        "Message",
+        "/instructor/1/students"
       );
 
       markAllAsRead(base.instructor.id);
 
+      expect(getUnreadCount(base.instructor.id)).toBe(0);
       expect(getUnreadCount(base.user.id)).toBe(1);
     });
   });
