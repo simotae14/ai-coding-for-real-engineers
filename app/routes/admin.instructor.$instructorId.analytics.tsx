@@ -6,7 +6,7 @@ import { UserRole } from "~/db/schema";
 import {
   getAnalyticsSummary,
   getRevenueTimeSeries,
-  getCourseBreakdown,
+  getPerCourseBreakdown,
   type TimePeriod,
 } from "~/services/analyticsService";
 import { AnalyticsDashboard } from "~/components/analytics-dashboard";
@@ -55,7 +55,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 
   const summary = getAnalyticsSummary({ instructorId, period });
   const timeSeries = getRevenueTimeSeries({ instructorId, period });
-  const courseBreakdown = getCourseBreakdown({ instructorId, period });
+  const courseBreakdown = getPerCourseBreakdown({ instructorId, period });
 
   return {
     summary,

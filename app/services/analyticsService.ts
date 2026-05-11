@@ -8,40 +8,17 @@ import {
   users,
 } from "~/db/schema";
 
+// ─── Analytics Service ───
+// Encapsulates all database query logic for the instructor analytics dashboard.
+// Takes an instructor ID and time period, returns summary, time series, and per-course data.
+
 export type TimePeriod = "7d" | "30d" | "12m" | "all";
-export type TimeSeriesGranularity = "day" | "month";
 
 export interface AnalyticsSummary {
   totalRevenue: number;
   totalEnrollments: number;
   averageRating: number | null;
   ratingCount: number;
-}
-
-export interface RevenueDataPoint {
-  date: string;
-  revenue: number;
-}
-
-export interface CourseBreakdown {
-  courseId: number;
-  title: string;
-  listPrice: number;
-  revenue: number;
-  salesCount: number;
-  enrollmentCount: number;
-  averageRating: number | null;
-  ratingCount: number;
-}
-
-export interface AdminAnalyticsSummary {
-  totalRevenue: number;
-  totalEnrollments: number;
-  topEarningCourse: { title: string; revenue: number } | null;
-}
-
-function getGranularity(period: TimePeriod): TimeSeriesGranularity {
-  return period === "7d" || period === "30d" ? "day" : "month";
 }
 
 function getStartDate(period: TimePeriod): string | null {
@@ -137,6 +114,50 @@ export function getAnalyticsSummary(opts: {
   };
 }
 
+// ─── Revenue Time Series ───
+
+export interface RevenueDataPoint {
+  date: string; // YYYY-MM-DD for daily, YYYY-MM for monthly
+  revenue: number; // in cents
+}
+
+function formatDateKey(d: Date): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function formatMonthKey(d: Date): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
+}
+
+function generateDailyKeys(startDate: Date, endDate: Date): string[] {
+  const keys: string[] = [];
+  const current = new Date(startDate);
+  current.setHours(0, 0, 0, 0);
+  const end = new Date(endDate);
+  end.setHours(0, 0, 0, 0);
+  while (current <= end) {
+    keys.push(formatDateKey(current));
+    current.setDate(current.getDate() + 1);
+  }
+  return keys;
+}
+
+function generateMonthlyKeys(startDate: Date, endDate: Date): string[] {
+  const keys: string[] = [];
+  const current = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+  const end = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
+  while (current <= end) {
+    keys.push(formatMonthKey(current));
+    current.setMonth(current.getMonth() + 1);
+  }
+  return keys;
+}
+
 export function getRevenueTimeSeries(opts: {
   instructorId: number;
   period: TimePeriod;
@@ -157,102 +178,121 @@ export function getRevenueTimeSeries(opts: {
     sql`, `
   );
 
-  const granularity = getGranularity(period);
-  const dateFormat = granularity === "day" ? "%Y-%m-%d" : "%Y-%m";
+  const now = new Date();
+  const useDaily = period === "7d" || period === "30d";
 
-  let startDate = getStartDate(period);
-  if (period === "all") {
+  // Determine the start date for the range
+  let rangeStart: Date;
+  const startDateStr = getStartDate(period);
+  if (startDateStr) {
+    rangeStart = new Date(startDateStr);
+  } else {
+    // "all" period: find the earliest purchase date
     const earliest = db
-      .select({ min: sql<string | null>`min(${purchases.createdAt})` })
+      .select({
+        minDate: sql<string | null>`min(${purchases.createdAt})`,
+      })
       .from(purchases)
       .where(sql`${purchases.courseId} IN (${courseIdList})`)
       .get();
-    if (!earliest?.min) return [];
-    startDate = earliest.min;
+
+    if (!earliest?.minDate) return [];
+    rangeStart = new Date(earliest.minDate);
   }
+
+  // Generate all date/month keys in range
+  const keys = useDaily
+    ? generateDailyKeys(rangeStart, now)
+    : generateMonthlyKeys(rangeStart, now);
+
+  // Query revenue grouped by date/month
+  const groupExpr = useDaily
+    ? sql<string>`substr(${purchases.createdAt}, 1, 10)`
+    : sql<string>`substr(${purchases.createdAt}, 1, 7)`;
+
+  const whereClause = startDateStr
+    ? sql`${purchases.courseId} IN (${courseIdList}) AND ${purchases.createdAt} >= ${startDateStr}`
+    : sql`${purchases.courseId} IN (${courseIdList})`;
 
   const rows = db
     .select({
-      bucket: sql<string>`strftime(${dateFormat}, ${purchases.createdAt})`,
+      dateKey: groupExpr,
       revenue: sql<number>`coalesce(sum(${purchases.pricePaid}), 0)`,
     })
     .from(purchases)
-    .where(
-      sql`${purchases.courseId} IN (${courseIdList}) AND ${purchases.createdAt} >= ${startDate}`
-    )
-    .groupBy(sql`strftime(${dateFormat}, ${purchases.createdAt})`)
+    .where(whereClause)
+    .groupBy(groupExpr)
     .all();
 
-  const revenueByBucket = new Map(rows.map((r) => [r.bucket, r.revenue]));
+  const revenueMap = new Map(rows.map((r) => [r.dateKey, r.revenue]));
 
-  const buckets: string[] = [];
-  const now = new Date();
-  const start = new Date(startDate!);
-
-  if (granularity === "day") {
-    const cursor = new Date(
-      Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate())
-    );
-    const end = new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
-    );
-    while (cursor <= end) {
-      buckets.push(cursor.toISOString().slice(0, 10));
-      cursor.setUTCDate(cursor.getUTCDate() + 1);
-    }
-  } else {
-    const cursor = new Date(
-      Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1)
-    );
-    const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-    while (cursor <= end) {
-      buckets.push(cursor.toISOString().slice(0, 7));
-      cursor.setUTCMonth(cursor.getUTCMonth() + 1);
-    }
-  }
-
-  return buckets.map((bucket) => ({
-    date: bucket,
-    revenue: revenueByBucket.get(bucket) ?? 0,
+  return keys.map((key) => ({
+    date: key,
+    revenue: revenueMap.get(key) ?? 0,
   }));
 }
 
-export function getCourseBreakdown(opts: {
+// ─── Per-Course Breakdown ───
+
+export interface CourseAnalytics {
+  courseId: number;
+  title: string;
+  slug: string;
+  listPrice: number;
+  revenue: number;
+  salesCount: number;
+  enrollmentCount: number;
+  averageRating: number | null;
+  ratingCount: number;
+}
+
+export function getPerCourseBreakdown(opts: {
   instructorId: number;
   period: TimePeriod;
-}): CourseBreakdown[] {
+}): CourseAnalytics[] {
   const { instructorId, period } = opts;
   const startDate = getStartDate(period);
 
   const instructorCourses = db
-    .select({ id: courses.id, title: courses.title, price: courses.price })
+    .select({
+      id: courses.id,
+      title: courses.title,
+      slug: courses.slug,
+      price: courses.price,
+    })
     .from(courses)
     .where(eq(courses.instructorId, instructorId))
     .all();
 
+  if (instructorCourses.length === 0) return [];
+
   return instructorCourses.map((course) => {
+    const purchaseWhere = startDate
+      ? sql`${purchases.courseId} = ${course.id} AND ${purchases.createdAt} >= ${startDate}`
+      : sql`${purchases.courseId} = ${course.id}`;
+
     const revenueResult = db
       .select({
-        total: sql<number>`coalesce(sum(${purchases.pricePaid}), 0)`,
-        count: sql<number>`count(*)`,
+        revenue: sql<number>`coalesce(sum(${purchases.pricePaid}), 0)`,
+        salesCount: sql<number>`count(*)`,
       })
       .from(purchases)
-      .where(
-        startDate
-          ? sql`${purchases.courseId} = ${course.id} AND ${purchases.createdAt} >= ${startDate}`
-          : sql`${purchases.courseId} = ${course.id}`
-      )
+      .where(purchaseWhere)
       .get();
+
+    const enrollmentWhere = startDate
+      ? sql`${enrollments.courseId} = ${course.id} AND ${enrollments.enrolledAt} >= ${startDate}`
+      : sql`${enrollments.courseId} = ${course.id}`;
 
     const enrollmentResult = db
       .select({ count: sql<number>`count(*)` })
       .from(enrollments)
-      .where(
-        startDate
-          ? sql`${enrollments.courseId} = ${course.id} AND ${enrollments.enrolledAt} >= ${startDate}`
-          : sql`${enrollments.courseId} = ${course.id}`
-      )
+      .where(enrollmentWhere)
       .get();
+
+    const ratingWhere = startDate
+      ? sql`${courseRatings.courseId} = ${course.id} AND ${courseRatings.createdAt} >= ${startDate}`
+      : sql`${courseRatings.courseId} = ${course.id}`;
 
     const ratingResult = db
       .select({
@@ -260,19 +300,16 @@ export function getCourseBreakdown(opts: {
         count: sql<number>`count(*)`,
       })
       .from(courseRatings)
-      .where(
-        startDate
-          ? sql`${courseRatings.courseId} = ${course.id} AND ${courseRatings.createdAt} >= ${startDate}`
-          : sql`${courseRatings.courseId} = ${course.id}`
-      )
+      .where(ratingWhere)
       .get();
 
     return {
       courseId: course.id,
       title: course.title,
+      slug: course.slug,
       listPrice: course.price,
-      revenue: revenueResult?.total ?? 0,
-      salesCount: revenueResult?.count ?? 0,
+      revenue: revenueResult?.revenue ?? 0,
+      salesCount: revenueResult?.salesCount ?? 0,
       enrollmentCount: enrollmentResult?.count ?? 0,
       averageRating: ratingResult?.avg ?? null,
       ratingCount: ratingResult?.count ?? 0,
@@ -280,7 +317,13 @@ export function getCourseBreakdown(opts: {
   });
 }
 
-// ─── Platform-wide admin analytics ───
+// ─── Admin (Platform-Wide) Analytics ───
+
+export interface AdminAnalyticsSummary {
+  totalRevenue: number;
+  totalEnrollments: number;
+  topEarningCourse: { title: string; revenue: number } | null;
+}
 
 export function getAdminAnalyticsSummary(opts: {
   period: TimePeriod;
@@ -290,26 +333,26 @@ export function getAdminAnalyticsSummary(opts: {
   const revenueResult = db
     .select({ total: sql<number>`coalesce(sum(${purchases.pricePaid}), 0)` })
     .from(purchases)
-    .where(startDate ? sql`${purchases.createdAt} >= ${startDate}` : sql`1 = 1`)
+    .where(startDate ? sql`${purchases.createdAt} >= ${startDate}` : sql`1=1`)
     .get();
 
   const enrollmentResult = db
     .select({ count: sql<number>`count(*)` })
     .from(enrollments)
     .where(
-      startDate ? sql`${enrollments.enrolledAt} >= ${startDate}` : sql`1 = 1`
+      startDate ? sql`${enrollments.enrolledAt} >= ${startDate}` : sql`1=1`
     )
     .get();
 
-  const topCourse = db
+  const topCourseResult = db
     .select({
       title: courses.title,
       revenue: sql<number>`coalesce(sum(${purchases.pricePaid}), 0)`,
     })
     .from(purchases)
     .innerJoin(courses, eq(purchases.courseId, courses.id))
-    .where(startDate ? sql`${purchases.createdAt} >= ${startDate}` : sql`1 = 1`)
-    .groupBy(purchases.courseId)
+    .where(startDate ? sql`${purchases.createdAt} >= ${startDate}` : sql`1=1`)
+    .groupBy(courses.id)
     .orderBy(sql`sum(${purchases.pricePaid}) desc`)
     .limit(1)
     .get();
@@ -317,8 +360,8 @@ export function getAdminAnalyticsSummary(opts: {
   return {
     totalRevenue: revenueResult?.total ?? 0,
     totalEnrollments: enrollmentResult?.count ?? 0,
-    topEarningCourse: topCourse
-      ? { title: topCourse.title, revenue: topCourse.revenue }
+    topEarningCourse: topCourseResult
+      ? { title: topCourseResult.title, revenue: topCourseResult.revenue }
       : null,
   };
 }
@@ -327,59 +370,52 @@ export function getAdminRevenueTimeSeries(opts: {
   period: TimePeriod;
 }): RevenueDataPoint[] {
   const { period } = opts;
-  const granularity = getGranularity(period);
-  const dateFormat = granularity === "day" ? "%Y-%m-%d" : "%Y-%m";
+  const now = new Date();
+  const useDaily = period === "7d" || period === "30d";
 
-  let startDate = getStartDate(period);
-  if (period === "all") {
+  const startDateStr = getStartDate(period);
+  let rangeStart: Date;
+
+  if (startDateStr) {
+    rangeStart = new Date(startDateStr);
+  } else {
     const earliest = db
-      .select({ min: sql<string | null>`min(${purchases.createdAt})` })
+      .select({
+        minDate: sql<string | null>`min(${purchases.createdAt})`,
+      })
       .from(purchases)
       .get();
-    if (!earliest?.min) return [];
-    startDate = earliest.min;
+
+    if (!earliest?.minDate) return [];
+    rangeStart = new Date(earliest.minDate);
   }
+
+  const keys = useDaily
+    ? generateDailyKeys(rangeStart, now)
+    : generateMonthlyKeys(rangeStart, now);
+
+  const groupExpr = useDaily
+    ? sql<string>`substr(${purchases.createdAt}, 1, 10)`
+    : sql<string>`substr(${purchases.createdAt}, 1, 7)`;
+
+  const whereClause = startDateStr
+    ? sql`${purchases.createdAt} >= ${startDateStr}`
+    : sql`1=1`;
 
   const rows = db
     .select({
-      bucket: sql<string>`strftime(${dateFormat}, ${purchases.createdAt})`,
+      dateKey: groupExpr,
       revenue: sql<number>`coalesce(sum(${purchases.pricePaid}), 0)`,
     })
     .from(purchases)
-    .where(sql`${purchases.createdAt} >= ${startDate}`)
-    .groupBy(sql`strftime(${dateFormat}, ${purchases.createdAt})`)
+    .where(whereClause)
+    .groupBy(groupExpr)
     .all();
 
-  const revenueByBucket = new Map(rows.map((r) => [r.bucket, r.revenue]));
+  const revenueMap = new Map(rows.map((r) => [r.dateKey, r.revenue]));
 
-  const buckets: string[] = [];
-  const now = new Date();
-  const start = new Date(startDate!);
-
-  if (granularity === "day") {
-    const cursor = new Date(
-      Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate())
-    );
-    const end = new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
-    );
-    while (cursor <= end) {
-      buckets.push(cursor.toISOString().slice(0, 10));
-      cursor.setUTCDate(cursor.getUTCDate() + 1);
-    }
-  } else {
-    const cursor = new Date(
-      Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1)
-    );
-    const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-    while (cursor <= end) {
-      buckets.push(cursor.toISOString().slice(0, 7));
-      cursor.setUTCMonth(cursor.getUTCMonth() + 1);
-    }
-  }
-
-  return buckets.map((bucket) => ({
-    date: bucket,
-    revenue: revenueByBucket.get(bucket) ?? 0,
+  return keys.map((key) => ({
+    date: key,
+    revenue: revenueMap.get(key) ?? 0,
   }));
 }

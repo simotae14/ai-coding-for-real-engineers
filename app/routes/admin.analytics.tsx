@@ -14,14 +14,14 @@ import {
   getAdminRevenueTimeSeries,
   type TimePeriod,
 } from "~/services/analyticsService";
-import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { cn, formatPrice } from "~/lib/utils";
+import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import {
-  DollarSign,
-  Users,
-  Trophy,
-  PackageOpen,
   AlertTriangle,
+  DollarSign,
+  PackageOpen,
+  Trophy,
+  Users,
 } from "lucide-react";
 import { Button } from "~/components/ui/button";
 
@@ -36,8 +36,8 @@ const PERIODS: { value: TimePeriod; label: string }[] = [
 
 export function meta() {
   return [
-    { title: "Admin Analytics — Cadence" },
-    { name: "description", content: "Platform-wide analytics dashboard" },
+    { title: "Platform Analytics — Cadence" },
+    { name: "description", content: "View platform-wide analytics" },
   ];
 }
 
@@ -45,13 +45,17 @@ export async function loader({ request }: Route.LoaderArgs) {
   const currentUserId = await getCurrentUserId(request);
 
   if (!currentUserId) {
-    throw data("Sign in to view analytics.", { status: 401 });
+    throw data("Select a user from the DevUI panel to view analytics.", {
+      status: 401,
+    });
   }
 
   const currentUser = getUserById(currentUserId);
 
   if (!currentUser || currentUser.role !== UserRole.Admin) {
-    throw data("Only admins can access this page.", { status: 403 });
+    throw data("Only admins can access this page.", {
+      status: 403,
+    });
   }
 
   const url = new URL(request.url);
@@ -67,7 +71,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export default function AdminAnalytics({ loaderData }: Route.ComponentProps) {
-  const { summary, timeSeries, period } = loaderData;
+  const { summary, period } = loaderData;
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
@@ -77,10 +81,7 @@ export default function AdminAnalytics({ loaderData }: Route.ComponentProps) {
     navigate(`?${params.toString()}`, { replace: true });
   }
 
-  const hasData =
-    summary.totalRevenue > 0 ||
-    summary.totalEnrollments > 0 ||
-    summary.topEarningCourse !== null;
+  const hasData = summary.totalRevenue > 0 || summary.totalEnrollments > 0;
 
   return (
     <div className="mx-auto max-w-7xl p-6 lg:p-8">
@@ -89,13 +90,13 @@ export default function AdminAnalytics({ loaderData }: Route.ComponentProps) {
           Home
         </Link>
         <span className="mx-2">/</span>
-        <span className="text-foreground">Admin Analytics</span>
+        <span className="text-foreground">Platform Analytics</span>
       </nav>
 
       <div className="mb-8">
         <h1 className="text-3xl font-bold">Platform Analytics</h1>
         <p className="mt-1 text-muted-foreground">
-          Revenue and enrollment data across all courses
+          Revenue and enrollment metrics across all courses
         </p>
       </div>
 
@@ -118,8 +119,7 @@ export default function AdminAnalytics({ loaderData }: Route.ComponentProps) {
           ))}
         </div>
 
-        {/* Empty state */}
-        {!hasData && (
+        {!hasData ? (
           <Card>
             <CardContent className="py-12 text-center">
               <PackageOpen className="mx-auto mb-3 size-10 text-muted-foreground/50" />
@@ -128,70 +128,65 @@ export default function AdminAnalytics({ loaderData }: Route.ComponentProps) {
               </h3>
               <p className="text-sm text-muted-foreground">
                 Revenue and enrollment data will appear here once courses have
-                purchases or enrollments.
+                sales or enrollments.
               </p>
             </CardContent>
           </Card>
-        )}
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-3">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Total Revenue
+                </CardTitle>
+                <DollarSign className="size-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {formatPrice(summary.totalRevenue)}
+                </div>
+              </CardContent>
+            </Card>
 
-        {hasData && (
-          <>
-            {/* Summary Cards */}
-            <div className="grid gap-4 sm:grid-cols-3">
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">
-                    Total Revenue
-                  </CardTitle>
-                  <DollarSign className="size-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">
-                    {formatPrice(summary.totalRevenue)}
-                  </div>
-                </CardContent>
-              </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Total Enrollments
+                </CardTitle>
+                <Users className="size-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {summary.totalEnrollments.toLocaleString()}
+                </div>
+              </CardContent>
+            </Card>
 
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">
-                    Total Enrollments
-                  </CardTitle>
-                  <Users className="size-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">
-                    {summary.totalEnrollments.toLocaleString()}
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">
-                    Top Earning Course
-                  </CardTitle>
-                  <Trophy className="size-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  {summary.topEarningCourse ? (
-                    <>
-                      <div className="truncate text-2xl font-bold">
-                        {formatPrice(summary.topEarningCourse.revenue)}
-                      </div>
-                      <p className="truncate text-xs text-muted-foreground">
-                        {summary.topEarningCourse.title}
-                      </p>
-                    </>
-                  ) : (
-                    <div className="text-2xl font-bold text-muted-foreground">
-                      N/A
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Top Earning Course
+                </CardTitle>
+                <Trophy className="size-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                {summary.topEarningCourse ? (
+                  <>
+                    <div className="text-2xl font-bold">
+                      {formatPrice(summary.topEarningCourse.revenue)}
                     </div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-          </>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {summary.topEarningCourse.title}
+                    </p>
+                  </>
+                ) : (
+                  <div className="text-2xl font-bold text-muted-foreground">
+                    N/A
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         )}
       </div>
     </div>
@@ -208,13 +203,13 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
       message =
         typeof error.data === "string"
           ? error.data
-          : "Please sign in to view analytics.";
+          : "Please select a user from the DevUI panel.";
     } else if (error.status === 403) {
       title = "Access denied";
       message =
         typeof error.data === "string"
           ? error.data
-          : "You don't have permission to access this page.";
+          : "Only admins can access this page.";
     } else {
       title = `Error ${error.status}`;
       message = typeof error.data === "string" ? error.data : error.statusText;
@@ -228,9 +223,6 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
         <h1 className="mb-2 text-2xl font-bold">{title}</h1>
         <p className="mb-6 text-muted-foreground">{message}</p>
         <div className="flex items-center justify-center gap-3">
-          <Link to="/admin/users">
-            <Button variant="outline">Manage Users</Button>
-          </Link>
           <Link to="/">
             <Button>Go Home</Button>
           </Link>

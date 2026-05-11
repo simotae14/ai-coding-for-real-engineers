@@ -24,7 +24,7 @@ import type {
   TimePeriod,
   AnalyticsSummary,
   RevenueDataPoint,
-  CourseBreakdown,
+  CourseAnalytics,
 } from "~/services/analyticsService";
 
 const PERIODS: { value: TimePeriod; label: string }[] = [
@@ -37,12 +37,12 @@ const PERIODS: { value: TimePeriod; label: string }[] = [
 interface AnalyticsDashboardProps {
   summary: AnalyticsSummary;
   timeSeries: RevenueDataPoint[];
-  courseBreakdown: CourseBreakdown[];
+  courseBreakdown: CourseAnalytics[];
   period: TimePeriod;
 }
 
 type SortField = keyof Pick<
-  CourseBreakdown,
+  CourseAnalytics,
   | "revenue"
   | "salesCount"
   | "enrollmentCount"
