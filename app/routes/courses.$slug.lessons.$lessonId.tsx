@@ -35,6 +35,15 @@ import type { CommentWithAuthor } from "~/services/commentService";
 import { COMMENT_MAX_LENGTH } from "~/services/commentConstants";
 import { getUserById } from "~/services/userService";
 import { LessonProgressStatus, UserRole } from "~/db/schema";
+import {
+  createComment,
+  listCommentsForLesson,
+  softDeleteComment,
+} from "~/services/commentService";
+import type { CommentWithAuthor } from "~/services/commentService";
+import { COMMENT_MAX_LENGTH } from "~/services/commentConstants";
+import { getUserById } from "~/services/userService";
+import { LessonProgressStatus, UserRole } from "~/db/schema";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
 import {
@@ -321,8 +330,6 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     comments,
     courseInstructorId: course.instructorId,
     currentUserRole: currentUserRecord?.role ?? null,
-    isBookmarked,
-    bookmarkedLessonIds,
   };
 }
 
@@ -474,8 +481,6 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
     comments,
     courseInstructorId,
     currentUserRole,
-    isBookmarked,
-    bookmarkedLessonIds,
   } = loaderData;
   const bookmarkedSet = new Set(bookmarkedLessonIds);
   const [autoplay, toggleAutoplay] = useAutoplay();
