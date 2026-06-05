@@ -330,6 +330,8 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     comments,
     courseInstructorId: course.instructorId,
     currentUserRole: currentUserRecord?.role ?? null,
+    isBookmarked,
+    bookmarkedLessonIds,
   };
 }
 
@@ -481,6 +483,8 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
     comments,
     courseInstructorId,
     currentUserRole,
+    isBookmarked,
+    bookmarkedLessonIds,
   } = loaderData;
   const bookmarkedSet = new Set(bookmarkedLessonIds);
   const [autoplay, toggleAutoplay] = useAutoplay();
