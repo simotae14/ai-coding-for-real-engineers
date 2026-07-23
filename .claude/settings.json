@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc:*)",
+      "Bash(pnpm *)",
+      "Websearch"
+    ],
+    "deny": [
+      "Bash(git push *)"
+    ]
+  }
+}
