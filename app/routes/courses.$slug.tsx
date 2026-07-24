@@ -1,5 +1,5 @@
-import { useEffect } from "react";
-import { Link, useSearchParams } from "react-router";
+import { useEffect, useState } from "react";
+import { Link, useSearchParams, useRevalidator } from "react-router";
 import { toast } from "sonner";
 import type { Route } from "./+types/courses.$slug";
 import {
@@ -42,6 +42,11 @@ import { formatDuration, formatPrice } from "~/lib/utils";
 import { renderMarkdown } from "~/lib/markdown.server";
 import { resolveCountry } from "~/lib/country.server";
 import { calculatePppPrice, getCountryTierInfo } from "~/lib/ppp";
+import {
+  getAverageRatingForCourse,
+  getUserRatingForCourse,
+} from "~/services/ratingService";
+import { StarRatingDisplay, StarRatingPicker } from "~/components/star-rating";
 
 export function meta({ data: loaderData }: Route.MetaArgs) {
   const title = loaderData?.course?.title ?? "Course";
@@ -71,6 +76,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   let progress = 0;
   let lessonProgressMap: Record<number, string> = {};
   let nextLessonId: number | null = null;
+  let userRating: number | null = null;
 
   if (currentUserId) {
     enrolled = isUserEnrolled(currentUserId, course.id);
@@ -88,8 +94,14 @@ export async function loader({ params, request }: Route.LoaderArgs) {
 
       const nextLesson = getNextIncompleteLesson(currentUserId, course.id);
       nextLessonId = nextLesson?.id ?? null;
+
+      userRating =
+        getUserRatingForCourse(currentUserId, course.id)?.score ?? null;
     }
   }
+
+  const { average: averageRating, count: ratingCount } =
+    getAverageRatingForCourse(course.id);
 
   // Render sales copy from Markdown to HTML server-side
   const salesCopyHtml = courseWithDetails.salesCopy
@@ -113,6 +125,9 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     currentUserId,
     pppPrice,
     tierInfo,
+    averageRating,
+    ratingCount,
+    userRating,
   };
 }
 
@@ -181,9 +196,41 @@ export default function CourseDetail({ loaderData }: Route.ComponentProps) {
     currentUserId,
     pppPrice,
     tierInfo,
+    averageRating,
+    ratingCount,
+    userRating,
   } = loaderData;
   const isInstructor = currentUserId === course.instructorId;
   const [searchParams, setSearchParams] = useSearchParams();
+  const revalidator = useRevalidator();
+  const [localRating, setLocalRating] = useState<number | null>(userRating);
+  const [isSubmittingRating, setIsSubmittingRating] = useState(false);
+
+  useEffect(() => {
+    setLocalRating(userRating);
+  }, [userRating, course.id]);
+
+  async function handleRate(score: number) {
+    setIsSubmittingRating(true);
+    const previousRating = localRating;
+    setLocalRating(score);
+    try {
+      const response = await fetch("/api/rate-course", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ courseId: course.id, score }),
+      });
+      if (!response.ok) {
+        throw new Error("Failed to save rating");
+      }
+      revalidator.revalidate();
+    } catch {
+      setLocalRating(previousRating);
+      toast.error("Couldn't save your rating. Please try again.");
+    } finally {
+      setIsSubmittingRating(false);
+    }
+  }
 
   useEffect(() => {
     if (searchParams.get("already_enrolled") === "1") {
@@ -320,6 +367,11 @@ export default function CourseDetail({ loaderData }: Route.ComponentProps) {
               {formatDuration(totalDuration, true, false, false)} total
             </span>
           )}
+          <StarRatingDisplay
+            average={averageRating}
+            count={ratingCount}
+            size="md"
+          />
         </div>
       </div>
 
@@ -416,6 +468,18 @@ export default function CourseDetail({ loaderData }: Route.ComponentProps) {
                 </>
               ) : (
                 enrollButton
+              )}
+              {enrolled && (
+                <div className="border-t pt-4">
+                  <p className="mb-2 text-sm font-medium">
+                    Rate this course
+                  </p>
+                  <StarRatingPicker
+                    value={localRating}
+                    disabled={isSubmittingRating}
+                    onChange={handleRate}
+                  />
+                </div>
               )}
               <div className="space-y-2 pt-2 text-sm text-muted-foreground">
                 <div className="flex items-center gap-2">
