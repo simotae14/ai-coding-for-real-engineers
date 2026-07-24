@@ -51,4 +51,5 @@ export default [
   route("api/video-tracking", "routes/api.video-tracking.ts"),
   route("api/set-dev-country", "routes/api.set-dev-country.ts"),
   route("api/rate-course", "routes/api.rate-course.ts"),
+  route("api/lesson-comments", "routes/api.lesson-comments.ts"),
 ] satisfies RouteConfig;

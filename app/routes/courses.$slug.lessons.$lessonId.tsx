@@ -10,6 +10,8 @@ import { getLessonById } from "~/services/lessonService";
 import { getModuleById } from "~/services/moduleService";
 import { getCurrentUserId } from "~/lib/session";
 import { isUserEnrolled } from "~/services/enrollmentService";
+import { getUserById } from "~/services/userService";
+import { getCommentsForLesson } from "~/services/lessonCommentService";
 import {
   getLessonProgress,
   getLessonProgressForCourse,
@@ -26,7 +28,8 @@ import {
   getBestAttempt,
 } from "~/services/quizService";
 import { computeResult } from "~/services/quizScoringService";
-import { LessonProgressStatus } from "~/db/schema";
+import { LessonProgressStatus, UserRole } from "~/db/schema";
+import { LessonComments } from "~/components/lesson-comments";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
 import {
@@ -191,6 +194,21 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     pppPurchaseCountry = pppResult.purchaseCountry;
   }
 
+  // Discussion visibility: enrolled students, the course's own instructor, or an admin
+  let currentUserRole: UserRole | null = null;
+  let canViewDiscussion = false;
+  if (currentUserId) {
+    const currentUser = getUserById(currentUserId);
+    currentUserRole = currentUser?.role ?? null;
+    canViewDiscussion =
+      enrolled ||
+      currentUserRole === UserRole.Admin ||
+      (currentUserRole === UserRole.Instructor &&
+        course.instructorId === currentUserId);
+  }
+
+  const comments = canViewDiscussion ? getCommentsForLesson(lessonId) : [];
+
   // Render lesson content from Markdown to HTML server-side
   const contentHtml = lesson.content
     ? await renderMarkdown(lesson.content)
@@ -281,6 +299,10 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     pppBlocked,
     pppBlockedCountry,
     pppPurchaseCountry,
+    canViewDiscussion,
+    comments,
+    currentUserRole,
+    courseInstructorId: course.instructorId,
   };
 }
 
@@ -382,6 +404,10 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
     pppBlocked,
     pppBlockedCountry,
     pppPurchaseCountry,
+    canViewDiscussion,
+    comments,
+    currentUserRole,
+    courseInstructorId,
   } = loaderData;
   const [autoplay, toggleAutoplay] = useAutoplay();
   const fetcher = useFetcher({ key: `mark-complete-${lesson.id}` });
@@ -590,6 +616,17 @@ export default function LessonViewer({ loaderData }: Route.ComponentProps) {
                 </fetcher.Form>
               )}
             </div>
+          )}
+
+          {/* Discussion */}
+          {canViewDiscussion && currentUserId && currentUserRole && (
+            <LessonComments
+              lessonId={lesson.id}
+              comments={comments}
+              currentUserId={currentUserId}
+              currentUserRole={currentUserRole}
+              courseInstructorId={courseInstructorId}
+            />
           )}
 
           {/* Prev/Next Navigation */}
