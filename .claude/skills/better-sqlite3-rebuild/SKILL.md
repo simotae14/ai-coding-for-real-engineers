@@ -7,8 +7,6 @@ description: Use when seeing errors about better-sqlite3 native module, NODE_MOD
 
 When you encounter errors related to `better-sqlite3` and Node.js version mismatches (e.g. `NODE_MODULE_VERSION` mismatch, "was compiled against a different Node.js version", native module load failures), proactively fix by running:
 
-```sh
-pnpm rebuild
-```
+[./script.sh](./script.sh)
 
 Do this without asking the user first - just rebuild and retry.
