@@ -1,13 +1,1 @@
-When you have a function with more than one parameter with the same type, use an object parameter instead of positional parameters:
-
-```ts
-// BAD
-const addUserToPost = (userId: string, postId: string) => {};
-
-// GOOD
-const addUserToPost = (opts: { userId: string; postId: string }) => {};
-```
-
----
-
-Anything marked as a 'service' (by the name of the file, for instance `authToken.service.ts`) should have test witten for the them in an accompanying `.test.ts` file.
+Load the `coding-standards` skill before writing code, reviewing changes, or answering questions about conventions. It covers database, frontend/UI, routes/forms, services/testing, and TypeScript conventions for this repo — see `.claude/skills/coding-standards/`.
