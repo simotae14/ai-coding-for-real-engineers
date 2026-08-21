@@ -35,15 +35,6 @@ import type { CommentWithAuthor } from "~/services/commentService";
 import { COMMENT_MAX_LENGTH } from "~/services/commentConstants";
 import { getUserById } from "~/services/userService";
 import { LessonProgressStatus, UserRole } from "~/db/schema";
-import {
-  createComment,
-  listCommentsForLesson,
-  softDeleteComment,
-} from "~/services/commentService";
-import type { CommentWithAuthor } from "~/services/commentService";
-import { COMMENT_MAX_LENGTH } from "~/services/commentConstants";
-import { getUserById } from "~/services/userService";
-import { LessonProgressStatus, UserRole } from "~/db/schema";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
 import {
