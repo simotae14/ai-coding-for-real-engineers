@@ -11,7 +11,12 @@ vi.mock("~/db", () => ({
   },
 }));
 
-import { getAnalyticsSummary, type TimePeriod } from "./analyticsService";
+import {
+  getAnalyticsSummary,
+  getRevenueTimeSeries,
+  getCourseBreakdown,
+  type TimePeriod,
+} from "./analyticsService";
 
 describe("analyticsService", () => {
   beforeEach(() => {
@@ -372,6 +377,300 @@ describe("analyticsService", () => {
       });
 
       expect(result.totalRevenue).toBe(0);
+    });
+  });
+
+  // ─── Revenue Time Series ───
+
+  describe("getRevenueTimeSeries", () => {
+    it("returns an empty array when instructor has no courses", () => {
+      const otherInstructor = testDb
+        .insert(schema.users)
+        .values({
+          name: "Other Instructor",
+          email: "other-ts@example.com",
+          role: schema.UserRole.Instructor,
+        })
+        .returning()
+        .get();
+
+      const result = getRevenueTimeSeries({
+        instructorId: otherInstructor.id,
+        period: "30d",
+      });
+
+      expect(result).toEqual([]);
+    });
+
+    it("returns an empty array for 'all' period when there is no purchase history", () => {
+      const result = getRevenueTimeSeries({
+        instructorId: base.instructor.id,
+        period: "all",
+      });
+
+      expect(result).toEqual([]);
+    });
+
+    it("buckets revenue daily for the 7d period, filling zero-revenue days", () => {
+      const now = new Date();
+      const twoDaysAgo = new Date(now);
+      twoDaysAgo.setDate(now.getDate() - 2);
+
+      testDb
+        .insert(schema.purchases)
+        .values({
+          userId: base.user.id,
+          courseId: base.course.id,
+          pricePaid: 4999,
+          country: "US",
+          createdAt: twoDaysAgo.toISOString(),
+        })
+        .run();
+
+      const result = getRevenueTimeSeries({
+        instructorId: base.instructor.id,
+        period: "7d",
+      });
+
+      // 7d period buckets daily, from 7 days ago through today (8 buckets)
+      expect(result).toHaveLength(8);
+      expect(result.every((point) => point.date.length === 10)).toBe(true);
+
+      const totalRevenue = result.reduce((sum, p) => sum + p.revenue, 0);
+      expect(totalRevenue).toBe(4999);
+
+      const zeroDays = result.filter((p) => p.revenue === 0);
+      expect(zeroDays.length).toBeGreaterThan(0);
+    });
+
+    it("buckets revenue monthly for the 12m period", () => {
+      const now = new Date();
+      const twoMonthsAgo = new Date(now);
+      twoMonthsAgo.setMonth(now.getMonth() - 2);
+
+      testDb
+        .insert(schema.purchases)
+        .values({
+          userId: base.user.id,
+          courseId: base.course.id,
+          pricePaid: 2999,
+          country: "US",
+          createdAt: twoMonthsAgo.toISOString(),
+        })
+        .run();
+
+      const result = getRevenueTimeSeries({
+        instructorId: base.instructor.id,
+        period: "12m",
+      });
+
+      expect(result.every((point) => point.date.length === 7)).toBe(true);
+      const totalRevenue = result.reduce((sum, p) => sum + p.revenue, 0);
+      expect(totalRevenue).toBe(2999);
+    });
+
+    it("only includes revenue from the specified instructor's courses", () => {
+      const otherInstructor = testDb
+        .insert(schema.users)
+        .values({
+          name: "Other Instructor",
+          email: "other-ts-2@example.com",
+          role: schema.UserRole.Instructor,
+        })
+        .returning()
+        .get();
+
+      const otherCourse = testDb
+        .insert(schema.courses)
+        .values({
+          title: "Other Course",
+          slug: "other-course-ts",
+          description: "Not mine",
+          instructorId: otherInstructor.id,
+          categoryId: base.category.id,
+          status: schema.CourseStatus.Published,
+          price: 9999,
+        })
+        .returning()
+        .get();
+
+      testDb
+        .insert(schema.purchases)
+        .values([
+          {
+            userId: base.user.id,
+            courseId: base.course.id,
+            pricePaid: 4999,
+            country: "US",
+          },
+          {
+            userId: base.user.id,
+            courseId: otherCourse.id,
+            pricePaid: 9999,
+            country: "US",
+          },
+        ])
+        .run();
+
+      const result = getRevenueTimeSeries({
+        instructorId: base.instructor.id,
+        period: "30d",
+      });
+
+      const totalRevenue = result.reduce((sum, p) => sum + p.revenue, 0);
+      expect(totalRevenue).toBe(4999);
+    });
+  });
+
+  // ─── Per-Course Breakdown ───
+
+  describe("getCourseBreakdown", () => {
+    it("returns an empty array when instructor has no courses", () => {
+      const otherInstructor = testDb
+        .insert(schema.users)
+        .values({
+          name: "Other Instructor",
+          email: "other-cb@example.com",
+          role: schema.UserRole.Instructor,
+        })
+        .returning()
+        .get();
+
+      const result = getCourseBreakdown({
+        instructorId: otherInstructor.id,
+        period: "all",
+      });
+
+      expect(result).toEqual([]);
+    });
+
+    it("returns a course with zeroed metrics when it has no data", () => {
+      const result = getCourseBreakdown({
+        instructorId: base.instructor.id,
+        period: "all",
+      });
+
+      expect(result).toHaveLength(1);
+      expect(result[0]).toMatchObject({
+        courseId: base.course.id,
+        title: base.course.title,
+        listPrice: base.course.price,
+        revenue: 0,
+        salesCount: 0,
+        enrollmentCount: 0,
+        averageRating: null,
+        ratingCount: 0,
+      });
+    });
+
+    it("correctly attributes revenue, sales, enrollments, and ratings per course", () => {
+      const course2 = testDb
+        .insert(schema.courses)
+        .values({
+          title: "Second Course",
+          slug: "second-course-cb",
+          description: "Another course",
+          instructorId: base.instructor.id,
+          categoryId: base.category.id,
+          status: schema.CourseStatus.Published,
+          price: 2999,
+        })
+        .returning()
+        .get();
+
+      testDb
+        .insert(schema.purchases)
+        .values([
+          {
+            userId: base.user.id,
+            courseId: base.course.id,
+            pricePaid: 4999,
+            country: "US",
+          },
+          {
+            userId: base.user.id,
+            courseId: course2.id,
+            pricePaid: 2999,
+            country: "US",
+          },
+          {
+            userId: base.instructor.id,
+            courseId: course2.id,
+            pricePaid: 2999,
+            country: "US",
+          },
+        ])
+        .run();
+
+      testDb
+        .insert(schema.enrollments)
+        .values([{ userId: base.user.id, courseId: base.course.id }])
+        .run();
+
+      testDb
+        .insert(schema.courseRatings)
+        .values([
+          { userId: base.user.id, courseId: base.course.id, rating: 4 },
+          { userId: base.user.id, courseId: course2.id, rating: 2 },
+        ])
+        .run();
+
+      const result = getCourseBreakdown({
+        instructorId: base.instructor.id,
+        period: "all",
+      });
+
+      const courseA = result.find((c) => c.courseId === base.course.id);
+      const courseB = result.find((c) => c.courseId === course2.id);
+
+      expect(courseA).toMatchObject({
+        revenue: 4999,
+        salesCount: 1,
+        enrollmentCount: 1,
+        averageRating: 4,
+        ratingCount: 1,
+      });
+      expect(courseB).toMatchObject({
+        revenue: 5998,
+        salesCount: 2,
+        enrollmentCount: 0,
+        averageRating: 2,
+        ratingCount: 1,
+      });
+    });
+
+    it("filters per-course data by the selected time period", () => {
+      const now = new Date();
+      const twoYearsAgo = new Date(now);
+      twoYearsAgo.setFullYear(now.getFullYear() - 2);
+
+      testDb
+        .insert(schema.purchases)
+        .values([
+          {
+            userId: base.user.id,
+            courseId: base.course.id,
+            pricePaid: 4999,
+            country: "US",
+            createdAt: now.toISOString(),
+          },
+          {
+            userId: base.instructor.id,
+            courseId: base.course.id,
+            pricePaid: 2500,
+            country: "US",
+            createdAt: twoYearsAgo.toISOString(),
+          },
+        ])
+        .run();
+
+      const result = getCourseBreakdown({
+        instructorId: base.instructor.id,
+        period: "30d",
+      });
+
+      expect(result[0].revenue).toBe(4999);
+      expect(result[0].salesCount).toBe(1);
     });
   });
 });

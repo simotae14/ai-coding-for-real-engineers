@@ -5,6 +5,8 @@ import { getUserById } from "~/services/userService";
 import { UserRole } from "~/db/schema";
 import {
   getAnalyticsSummary,
+  getRevenueTimeSeries,
+  getCourseBreakdown,
   type TimePeriod,
 } from "~/services/analyticsService";
 import { AnalyticsDashboard } from "~/components/analytics-dashboard";
@@ -43,14 +45,22 @@ export async function loader({ request }: Route.LoaderArgs) {
     instructorId: currentUserId,
     period,
   });
+  const timeSeries = getRevenueTimeSeries({
+    instructorId: currentUserId,
+    period,
+  });
+  const courseBreakdown = getCourseBreakdown({
+    instructorId: currentUserId,
+    period,
+  });
 
-  return { summary, period };
+  return { summary, timeSeries, courseBreakdown, period };
 }
 
 export default function InstructorAnalytics({
   loaderData,
 }: Route.ComponentProps) {
-  const { summary, period } = loaderData;
+  const { summary, timeSeries, courseBreakdown, period } = loaderData;
 
   return (
     <div className="mx-auto max-w-7xl p-6 lg:p-8">
@@ -73,7 +83,12 @@ export default function InstructorAnalytics({
         </p>
       </div>
 
-      <AnalyticsDashboard summary={summary} period={period} />
+      <AnalyticsDashboard
+        summary={summary}
+        timeSeries={timeSeries}
+        courseBreakdown={courseBreakdown}
+        period={period}
+      />
     </div>
   );
 }
