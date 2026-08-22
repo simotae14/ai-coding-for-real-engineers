@@ -1,147 +1,81 @@
-# Implementation Plan: Instructor Revenue Analytics Dashboard
+# Plan: Instructor Revenue Analytics Dashboard
 
-Source PRD: `prd/instructor-analytics-dashboard.md`
+> Source PRD: `prd/instructor-analytics-dashboard.md`
 
----
+## Architectural decisions
 
-## Phase 1: Analytics Service + Tests
+Durable decisions that apply across all phases:
 
-Build the core data layer behind a simple, testable interface. No UI work yet.
-
-### Steps
-
-1. **Create `app/services/analyticsService.ts`** with a single main function:
-   - `getInstructorAnalytics(opts: { instructorId: number; period: "7d" | "30d" | "12m" | "all" })` → returns `{ summary, timeSeries, courses }`
-   - `summary`: `{ totalRevenue: number; totalEnrollments: number; averageRating: number | null; ratingCount: number }`
-   - `timeSeries`: `Array<{ date: string; revenue: number }>` — daily buckets for 7d/30d, monthly buckets for 12m/all
-   - `courses`: `Array<{ courseId: number; title: string; listPrice: number; revenue: number; salesCount: number; enrollmentCount: number; averageRating: number | null; ratingCount: number }>`
-
-2. **Query logic inside the service:**
-   - Join `courses` (filtered by `instructorId`) with `purchases`, `enrollments`, and `courseRatings`
-   - Filter each by the time window derived from `period` (compute a `startDate` ISO string, or no filter for "all")
-   - Revenue = `SUM(pricePaid)` from `purchases` — includes individual and team purchases
-   - Enrollments = `COUNT(*)` from `enrollments`
-   - Ratings = `AVG(rating)` and `COUNT(*)` from `courseRatings`
-   - Time series: group purchases by day or month depending on period, fill gaps with `$0`
-   - Per-course table: aggregate per `courseId`
-
-3. **Create `app/services/analyticsService.test.ts`** following existing test patterns:
-   - Mock `~/db`, use `createTestDb()` + `seedBaseData()` in `beforeEach`
-   - Test scenarios:
-     - Summary totals correct for a single course with multiple purchases
-     - Summary totals correct across multiple courses
-     - Time period filtering includes/excludes boundary data
-     - Daily granularity for 7d/30d periods
-     - Monthly granularity for 12m/all periods
-     - Zero-revenue periods appear as `$0` data points (no gaps)
-     - Instructor isolation — other instructors' course data excluded
-     - Empty state — instructor with no courses returns zeroed summary and empty arrays
-     - Courses with no purchases return `0` revenue and `0` salesCount
-     - Courses with no ratings return `null` averageRating and `0` ratingCount
-
-### Acceptance Criteria
-
-- All tests pass
-- Service returns correctly shaped data for all period values
-- No direct SQL strings — all queries via Drizzle ORM
+- **Routes**:
+  - `/instructor/analytics` — instructor-only, registered in `app/routes.ts` alongside existing `instructor/*` routes.
+  - `/admin/instructor/:instructorId/analytics` — admin-only, separate namespace from instructor routes, registered alongside existing `admin/*` routes.
+  - Both routes are thin loaders that authenticate/authorize via `getCurrentUserId(request)` + role check against `UserRole.Instructor` / `UserRole.Admin` (same pattern as `app/routes/instructor.tsx` and `app/routes/admin.users.tsx`), then delegate all data fetching to `analyticsService`. The instructor route always passes the current user's own ID to the service (never a client-supplied ID); the admin route reads `instructorId` from URL params.
+  - Both routes render a shared, presentational `AnalyticsDashboard` component.
+- **URL search param**: `?period=7d|30d|12m|all`, defaulting to `30d`. Drives the loader query and all sections of the dashboard (summary cards, chart, table) — one period, one page, no mixed scopes. The period selector navigates (not client-side state) so the page stays bookmailable and loader-driven.
+- **Schema**: no changes. Data sources are the existing `purchases` (`pricePaid`, cents), `enrollments` (`enrolledAt`), `courseRatings` (`rating`, `createdAt`), and `courses` (`instructorId`) tables.
+- **Key model — `analyticsService`**: new deep module in `app/services/analyticsService.ts`, following the existing service-layer convention (positional params, plain functions over `db`, paired `.test.ts`). Given an instructor ID and a period, returns in one call:
+  - summary totals (total revenue, total enrollments, average rating + rating count)
+  - revenue time-series data points (daily granularity for 7d/30d, monthly for 12mo/all; zero-revenue points included, no gaps)
+  - per-course breakdown (title, list price, revenue, sales count, enrollment count, average rating, rating count)
+  - Return type is additive/extensible so later metrics (PPP impact, geographic breakdown, etc.) can be added without breaking the interface.
+- **New dependency**: `recharts`, used directly (no shadcn chart wrapper) for the revenue line chart.
+- **Formatting**: revenue in cents converted to dollars via the existing `formatPrice()` util (`app/lib/utils.ts`).
+- **Instructor isolation**: enforced entirely at the loader layer — the instructor route never accepts an instructor ID from the client; the service itself doesn't re-check identity.
+- **Table sorting**: client-side only (all data already loaded per period), every column sortable, default sort revenue descending.
 
 ---
 
-## Phase 2: Shared Dashboard Component + Recharts
+## Phase 1: Instructor summary view with period filter
 
-Build the presentational layer that both routes will share.
+**User stories**: 1, 2, 3, 5, 6, 12, 16, 17, 18, 19, 20
 
-### Steps
+### What to build
 
-1. **Install recharts:** `pnpm add recharts`
+The first end-to-end slice: `analyticsService` computing summary totals (total revenue, total enrollments, average rating + count) for a given instructor and period; the `/instructor/analytics` route with a loader that authenticates the user as an instructor (redirecting unauthenticated users to login, blocking students with a 403), reads `?period=` from the URL (defaulting to `30d`), and calls the service with the instructor's own user ID; and a dashboard UI showing three summary cards plus a period selector (7d / 30d / 12mo / All) that navigates via URL search params, updating all shown data. Revenue is displayed in dollars via `formatPrice()`.
 
-2. **Create `app/components/analytics-dashboard.tsx`** — a presentational component that receives analytics data as props:
-   - **Period selector tabs** — four buttons (7d / 30d / 12mo / All) rendered as links with `?period=` search params. Highlight the active period. Use React Router's `useSearchParams` or `<Link>` with search params.
-   - **Three summary cards** using shadcn `Card`:
-     - Total Revenue — formatted with `formatPrice()`
-     - Total Enrollments — plain number
-     - Average Rating — e.g. "4.3 / 5 (12 ratings)" or "No ratings yet"
-   - **Revenue line chart** using recharts `<LineChart>`:
-     - X-axis: date labels (auto-formatted)
-     - Y-axis: revenue in dollars
-     - Tooltip showing formatted dollar value
-     - Responsive container
-   - **Per-course table** with columns: Course Title, List Price, Revenue, Sales, Enrollments, Avg Rating, Rating Count
-     - Client-side sorting by clicking column headers (ascending/descending toggle)
-     - Default sort: revenue descending
-     - Prices formatted with `formatPrice()`
-   - **Empty state** — friendly message when no courses or no data
+### Acceptance criteria
 
-3. **Define the component's props type** to match the analytics service return type exactly (import or re-export).
-
-### Acceptance Criteria
-
-- Component renders all sections from props data
-- Period selector links produce correct `?period=` URLs
-- Table sorting works client-side with visual sort indicators
-- Empty state displays when data is empty
-- All prices formatted via `formatPrice()`
+- [ ] `analyticsService` exposes a function that returns summary totals (revenue, enrollments, avg rating + rating count) scoped to an instructor and a period
+- [ ] Visiting `/instructor/analytics` with no `?period=` defaults to 30 days
+- [ ] Switching the period tab updates the URL and the summary cards reflect the new period
+- [ ] An unauthenticated request is redirected to login
+- [ ] A student user is blocked (403) from the route
+- [ ] An instructor only ever sees totals for their own courses, never another instructor's
+- [ ] Revenue is rendered in dollars, formatted from cents
 
 ---
 
-## Phase 3: Instructor Analytics Route
+## Phase 2: Revenue trend chart and per-course table
 
-Wire up the instructor-facing route.
+**User stories**: 4, 7, 8, 9, 21, 22
 
-### Steps
+### What to build
 
-1. **Create route file `app/routes/instructor.analytics.tsx`** (maps to `/instructor/analytics`):
-   - **Loader:**
-     - `getCurrentUserId(request)` → redirect to `/login` if null
-     - `getUserById(userId)` → 403 if not `UserRole.Instructor`
-     - Read `period` from URL search params, default to `"30d"`, validate against allowed values
-     - Call `getInstructorAnalytics({ instructorId: userId, period })`
-     - Return analytics data + period
-   - **Component:**
-     - `useLoaderData()` to get data
-     - Render `<AnalyticsDashboard>` with the data
+Extend `analyticsService`'s return value with a revenue time-series (auto-scaling granularity: daily for 7d/30d, monthly for 12mo/All, zero-revenue periods rendered as $0 points so the line is continuous) and a per-course breakdown (list price, revenue, sales count, enrollment count, average rating, rating count — all scoped to the selected period). Add `recharts` as a dependency and render a revenue-over-time line chart. Add a per-course table below the chart, sortable by clicking any column header (ascending/descending), defaulting to revenue descending. Both the chart and table react to the same period selector built in Phase 1.
 
-2. **Add "Analytics" to the instructor sidebar navigation** in `app/components/sidebar.tsx`:
-   - Add entry: `{ label: "Analytics", to: "/instructor/analytics", roles: [UserRole.Instructor] }`
-   - Place it after "My Courses"
+### Acceptance criteria
 
-### Acceptance Criteria
-
-- `/instructor/analytics` loads and displays the dashboard for the logged-in instructor
-- Default period is 30d
-- Changing period via tabs reloads the page with correct data
-- Period is stored in URL (`?period=7d`)
-- Students get 403, unauthenticated users redirect to login
-- "Analytics" link visible in sidebar for instructors only
+- [ ] `analyticsService` returns correctly bucketed time-series points (daily vs. monthly) for a given period
+- [ ] `analyticsService` returns a per-course breakdown correctly attributing revenue, sales, enrollments, and ratings to the right courses
+- [ ] The line chart renders using `recharts`, updates with the period selector, and shows $0 points instead of gaps for periods with no revenue
+- [ ] The per-course table shows all required columns and defaults to sorting by revenue descending
+- [ ] Clicking any column header toggles ascending/descending client-side sort
+- [ ] Switching periods updates the chart and table together with the summary cards from Phase 1
 
 ---
 
-## Phase 4: Admin Analytics Route + Users Page Link
+## Phase 3: Empty state and admin access
 
-Wire up admin access to any instructor's dashboard.
+**User stories**: 10, 13, 14, 15
 
-### Steps
+### What to build
 
-1. **Create route file `app/routes/admin.instructor.$instructorId.analytics.tsx`** (maps to `/admin/instructor/:instructorId/analytics`):
-   - **Loader:**
-     - `getCurrentUserId(request)` → redirect to `/login` if null
-     - `getUserById(userId)` → 403 if not `UserRole.Admin`
-     - `parseParams(params, schema)` to extract and validate `instructorId`
-     - Read `period` from URL search params, default to `"30d"`
-     - Call `getInstructorAnalytics({ instructorId, period })`
-     - Return analytics data + period + instructor info (name, for the page heading)
-   - **Component:**
-     - Render `<AnalyticsDashboard>` with the data
-     - Show instructor name in a heading above the dashboard
+Add a friendly empty-state message (e.g. "No revenue data yet. Publish a course to start tracking analytics.") shown in place of the full dashboard when the instructor has no courses or no data in the selected period. Add the admin-only `/admin/instructor/:instructorId/analytics` route, whose loader authenticates the user as an admin, reads the instructor ID from URL params and the period from search params, and renders the same shared `AnalyticsDashboard` component. Add a "View Analytics" link next to instructor rows on the admin users page, and an "Analytics" entry in the instructor sidebar nav pointing at `/instructor/analytics`.
 
-2. **Modify `app/routes/admin.users.tsx`** to add a "View Analytics" link:
-   - Next to each user with `role === "instructor"`, add a link to `/admin/instructor/:id/analytics`
-   - Use a small icon/link (e.g. lucide `BarChart3` icon or text link)
+### Acceptance criteria
 
-### Acceptance Criteria
-
-- `/admin/instructor/5/analytics` loads that instructor's dashboard for admins
-- Non-admin users get 403
-- Invalid instructor ID returns 404 or appropriate error
-- Admin users page shows "View Analytics" link only for instructor-role users
-- Link navigates to the correct admin analytics route
+- [ ] An instructor with no courses, or no data in the selected period, sees the single empty-state message instead of a zeros-everywhere dashboard
+- [ ] `/admin/instructor/:instructorId/analytics` requires admin role and renders the same dashboard layout/data an instructor would see for that instructor
+- [ ] The admin route is authorization-checked independently of the instructor route (no shared bypass)
+- [ ] The admin users page shows a "View Analytics" link for instructor-role users, linking to their analytics route
+- [ ] The instructor sidebar shows an "Analytics" nav entry linking to `/instructor/analytics`
