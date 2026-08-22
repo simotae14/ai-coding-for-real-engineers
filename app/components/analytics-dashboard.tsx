@@ -11,7 +11,7 @@ import {
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { cn, formatPrice } from "~/lib/utils";
-import { DollarSign, Users, Star, ArrowUpDown } from "lucide-react";
+import { DollarSign, Users, Star, ArrowUpDown, BarChart3 } from "lucide-react";
 import type {
   TimePeriod,
   AnalyticsSummary,
@@ -111,25 +111,52 @@ export function AnalyticsDashboard({
     navigate(`?${params.toString()}`, { replace: true });
   }
 
+  const hasNoCourses = courseBreakdown.length === 0;
+  const hasNoData =
+    summary.totalRevenue === 0 &&
+    summary.totalEnrollments === 0 &&
+    summary.ratingCount === 0;
+  const isEmpty = hasNoCourses || hasNoData;
+
+  const periodSelector = (
+    <div className="flex gap-1 rounded-lg bg-muted p-1">
+      {PERIODS.map((p) => (
+        <button
+          key={p.value}
+          onClick={() => handlePeriodChange(p.value)}
+          className={cn(
+            "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+            period === p.value
+              ? "bg-background text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground"
+          )}
+        >
+          {p.label}
+        </button>
+      ))}
+    </div>
+  );
+
+  if (isEmpty) {
+    return (
+      <div className="space-y-6">
+        {periodSelector}
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+            <BarChart3 className="mb-4 size-10 text-muted-foreground/50" />
+            <p className="text-muted-foreground">
+              No revenue data yet. Publish a course to start tracking analytics.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Period Selector */}
-      <div className="flex gap-1 rounded-lg bg-muted p-1">
-        {PERIODS.map((p) => (
-          <button
-            key={p.value}
-            onClick={() => handlePeriodChange(p.value)}
-            className={cn(
-              "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-              period === p.value
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
-            )}
-          >
-            {p.label}
-          </button>
-        ))}
-      </div>
+      {periodSelector}
 
       {/* Summary Cards */}
       <div className="grid gap-4 sm:grid-cols-3">
@@ -200,7 +227,10 @@ export function AnalyticsDashboard({
             <div className="h-72 w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={timeSeries}>
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    className="stroke-muted"
+                  />
                   <XAxis
                     dataKey="date"
                     tickFormatter={formatChartDate}
@@ -239,53 +269,47 @@ export function AnalyticsDashboard({
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {sortedCourses.length === 0 ? (
-            <p className="py-12 text-center text-sm text-muted-foreground">
-              No courses to show for this period.
-            </p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left">
-                    {COLUMNS.map((column) => (
-                      <th key={column.key} className="pb-2 pr-4">
-                        <button
-                          onClick={() => handleSort(column.key)}
-                          className={cn(
-                            "flex items-center gap-1 font-medium text-muted-foreground hover:text-foreground",
-                            sortColumn === column.key && "text-foreground"
-                          )}
-                        >
-                          {column.label}
-                          <ArrowUpDown className="size-3" />
-                        </button>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {sortedCourses.map((course) => (
-                    <tr key={course.courseId} className="border-b last:border-0">
-                      <td className="py-2 pr-4">{course.title}</td>
-                      <td className="py-2 pr-4">
-                        {formatPrice(course.listPrice)}
-                      </td>
-                      <td className="py-2 pr-4">{formatPrice(course.revenue)}</td>
-                      <td className="py-2 pr-4">{course.salesCount}</td>
-                      <td className="py-2 pr-4">{course.enrollmentCount}</td>
-                      <td className="py-2 pr-4">
-                        {course.averageRating !== null
-                          ? course.averageRating.toFixed(1)
-                          : "N/A"}
-                      </td>
-                      <td className="py-2 pr-4">{course.ratingCount}</td>
-                    </tr>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-left">
+                  {COLUMNS.map((column) => (
+                    <th key={column.key} className="pb-2 pr-4">
+                      <button
+                        onClick={() => handleSort(column.key)}
+                        className={cn(
+                          "flex items-center gap-1 font-medium text-muted-foreground hover:text-foreground",
+                          sortColumn === column.key && "text-foreground"
+                        )}
+                      >
+                        {column.label}
+                        <ArrowUpDown className="size-3" />
+                      </button>
+                    </th>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                </tr>
+              </thead>
+              <tbody>
+                {sortedCourses.map((course) => (
+                  <tr key={course.courseId} className="border-b last:border-0">
+                    <td className="py-2 pr-4">{course.title}</td>
+                    <td className="py-2 pr-4">
+                      {formatPrice(course.listPrice)}
+                    </td>
+                    <td className="py-2 pr-4">{formatPrice(course.revenue)}</td>
+                    <td className="py-2 pr-4">{course.salesCount}</td>
+                    <td className="py-2 pr-4">{course.enrollmentCount}</td>
+                    <td className="py-2 pr-4">
+                      {course.averageRating !== null
+                        ? course.averageRating.toFixed(1)
+                        : "N/A"}
+                    </td>
+                    <td className="py-2 pr-4">{course.ratingCount}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </CardContent>
       </Card>
     </div>
