@@ -21,6 +21,10 @@ If the task has not already been planned, create a plan for it.
 
 Work through the plan step by step.
 
+For backend code, use red/green refactor: write one failing test (red), write the minimum code to pass it (green), then move to the next test. Work tracer-bullet style — one test at a time, keep each cycle small, and confirm red before green so the test is proven to actually check something. Refactor if needed while keeping the tests green.
+
+For frontend code, implement directly without TDD.
+
 ### 4. Validate
 
 Run the feedback loops and fix any issues. Repeat until both pass cleanly.
