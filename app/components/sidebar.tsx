@@ -131,7 +131,9 @@ export function Sidebar({
     document.documentElement.classList.toggle("dark", next);
     try {
       localStorage.setItem("cadence-theme", next ? "dark" : "light");
-    } catch {}
+    } catch {
+      // localStorage may be unavailable (e.g. private browsing)
+    }
   }
 
   return (
@@ -140,7 +142,7 @@ export function Sidebar({
         <NavLink to="/" className="text-lg font-bold tracking-tight">
           Cadence
         </NavLink>
-        {currentUser?.role === UserRole.Instructor && (
+        {(currentUser?.role === UserRole.Instructor || isTeamAdmin) && (
           <NotificationBell
             notifications={notifications}
             unreadCount={notificationUnreadCount}
