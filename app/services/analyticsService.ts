@@ -1,10 +1,12 @@
 import { sql, eq } from "drizzle-orm";
 import { db } from "~/db";
-import { purchases, enrollments, courseRatings, courses } from "~/db/schema";
-
-// ─── Analytics Service ───
-// Encapsulates all database query logic for the instructor analytics dashboard.
-// Takes an instructor ID and time period, returns summary data.
+import {
+  purchases,
+  enrollments,
+  courseRatings,
+  courses,
+  users,
+} from "~/db/schema";
 
 export type TimePeriod = "7d" | "30d" | "12m" | "all";
 export type TimeSeriesGranularity = "day" | "month";
@@ -30,6 +32,12 @@ export interface CourseBreakdown {
   enrollmentCount: number;
   averageRating: number | null;
   ratingCount: number;
+}
+
+export interface AdminAnalyticsSummary {
+  totalRevenue: number;
+  totalEnrollments: number;
+  topEarningCourse: { title: string; revenue: number } | null;
 }
 
 function getGranularity(period: TimePeriod): TimeSeriesGranularity {
@@ -193,7 +201,9 @@ export function getRevenueTimeSeries(opts: {
       cursor.setUTCDate(cursor.getUTCDate() + 1);
     }
   } else {
-    const cursor = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1));
+    const cursor = new Date(
+      Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1)
+    );
     const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
     while (cursor <= end) {
       buckets.push(cursor.toISOString().slice(0, 7));
@@ -268,4 +278,108 @@ export function getCourseBreakdown(opts: {
       ratingCount: ratingResult?.count ?? 0,
     };
   });
+}
+
+// ─── Platform-wide admin analytics ───
+
+export function getAdminAnalyticsSummary(opts: {
+  period: TimePeriod;
+}): AdminAnalyticsSummary {
+  const startDate = getStartDate(opts.period);
+
+  const revenueResult = db
+    .select({ total: sql<number>`coalesce(sum(${purchases.pricePaid}), 0)` })
+    .from(purchases)
+    .where(startDate ? sql`${purchases.createdAt} >= ${startDate}` : sql`1 = 1`)
+    .get();
+
+  const enrollmentResult = db
+    .select({ count: sql<number>`count(*)` })
+    .from(enrollments)
+    .where(
+      startDate ? sql`${enrollments.enrolledAt} >= ${startDate}` : sql`1 = 1`
+    )
+    .get();
+
+  const topCourse = db
+    .select({
+      title: courses.title,
+      revenue: sql<number>`coalesce(sum(${purchases.pricePaid}), 0)`,
+    })
+    .from(purchases)
+    .innerJoin(courses, eq(purchases.courseId, courses.id))
+    .where(startDate ? sql`${purchases.createdAt} >= ${startDate}` : sql`1 = 1`)
+    .groupBy(purchases.courseId)
+    .orderBy(sql`sum(${purchases.pricePaid}) desc`)
+    .limit(1)
+    .get();
+
+  return {
+    totalRevenue: revenueResult?.total ?? 0,
+    totalEnrollments: enrollmentResult?.count ?? 0,
+    topEarningCourse: topCourse
+      ? { title: topCourse.title, revenue: topCourse.revenue }
+      : null,
+  };
+}
+
+export function getAdminRevenueTimeSeries(opts: {
+  period: TimePeriod;
+}): RevenueDataPoint[] {
+  const { period } = opts;
+  const granularity = getGranularity(period);
+  const dateFormat = granularity === "day" ? "%Y-%m-%d" : "%Y-%m";
+
+  let startDate = getStartDate(period);
+  if (period === "all") {
+    const earliest = db
+      .select({ min: sql<string | null>`min(${purchases.createdAt})` })
+      .from(purchases)
+      .get();
+    if (!earliest?.min) return [];
+    startDate = earliest.min;
+  }
+
+  const rows = db
+    .select({
+      bucket: sql<string>`strftime(${dateFormat}, ${purchases.createdAt})`,
+      revenue: sql<number>`coalesce(sum(${purchases.pricePaid}), 0)`,
+    })
+    .from(purchases)
+    .where(sql`${purchases.createdAt} >= ${startDate}`)
+    .groupBy(sql`strftime(${dateFormat}, ${purchases.createdAt})`)
+    .all();
+
+  const revenueByBucket = new Map(rows.map((r) => [r.bucket, r.revenue]));
+
+  const buckets: string[] = [];
+  const now = new Date();
+  const start = new Date(startDate!);
+
+  if (granularity === "day") {
+    const cursor = new Date(
+      Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate())
+    );
+    const end = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+    );
+    while (cursor <= end) {
+      buckets.push(cursor.toISOString().slice(0, 10));
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+  } else {
+    const cursor = new Date(
+      Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1)
+    );
+    const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    while (cursor <= end) {
+      buckets.push(cursor.toISOString().slice(0, 7));
+      cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+    }
+  }
+
+  return buckets.map((bucket) => ({
+    date: bucket,
+    revenue: revenueByBucket.get(bucket) ?? 0,
+  }));
 }
