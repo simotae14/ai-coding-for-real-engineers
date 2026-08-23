@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createTestDb, seedBaseData } from "~/test/setup";
 import * as schema from "~/db/schema";
+import { getNotifications } from "~/services/notificationService";
 
 let testDb: ReturnType<typeof createTestDb>;
 let base: ReturnType<typeof seedBaseData>;
@@ -77,6 +78,22 @@ describe("enrollmentService", () => {
     it("accepts sendEmail parameter without error", () => {
       const enrollment = enrollUser(base.user.id, base.course.id, true, false);
       expect(enrollment).toBeDefined();
+    });
+
+    it("creates a notification for the course's instructor", () => {
+      enrollUser(base.user.id, base.course.id, false, false);
+
+      const notifications = getNotifications(base.instructor.id, 10, 0);
+      expect(notifications).toHaveLength(1);
+      expect(notifications[0].type).toBe(schema.NotificationType.Enrollment);
+      expect(notifications[0].title).toBe("New Enrollment");
+      expect(notifications[0].message).toBe(
+        `${base.user.name} enrolled in ${base.course.title}`
+      );
+      expect(notifications[0].linkUrl).toBe(
+        `/instructor/${base.course.id}/students`
+      );
+      expect(notifications[0].isRead).toBe(false);
     });
   });
 
